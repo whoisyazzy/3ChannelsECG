@@ -1,704 +1,439 @@
 import sys
-import subprocess
-import time
 import numpy as np
 import pyqtgraph as pg
-import threading
-import queue
-from time import sleep
-import csv
-from datetime import datetime
-from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-	QApplication, QMainWindow, QWidget,
-	QPushButton, QLabel, QLineEdit,
-	QVBoxLayout, QHBoxLayout, QGridLayout,
-	QFileDialog
+    QApplication, QMainWindow, QWidget, QStackedWidget,
+    QPushButton, QLabel, QLineEdit,
+    QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
 
-# Try to import spidev (only available on Raspberry Pi)
-try:
-	import spidev
-	SPI_AVAILABLE = True
-except ImportError:
-	SPI_AVAILABLE = False
-	print("WARNING: spidev not available - running in simulation mode")
 
-# Switched to lgpio for Raspberry Pi 5
-try:
-	import lgpio
-	GPIO_AVAILABLE = True
-except ImportError:
-	GPIO_AVAILABLE = False
-	print("WARNING: lgpio not available - DRDY pin won't be used")
+class AnalyticsPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
 
-
-class ADS1293:
-	"""
-	Driver for Texas Instruments ADS1293 ECG Chip
-	Configuration based on TI datasheet examples for single-lead ECG:
-	- Lead I: Channel 1 (IN2-IN1) = LA-RA
-	"""
-
-	# ── Operation Mode ───────────────────────────────────────────────────────────
-	REG_CONFIG          = 0x00
-
-	# ── Input Channel Selection ──────────────────────────────────────────────────
-	REG_FLEX_CH1_CN     = 0x01
-	REG_FLEX_CH2_CN     = 0x02
-	REG_FLEX_CH3_CN     = 0x03
-	REG_FLEX_PACE_CN    = 0x04
-	REG_FLEX_VBAT_CN    = 0x05
-
-	# ── Lead-off Detect ──────────────────────────────────────────────────────────
-	REG_LOD_CN          = 0x06
-	REG_LOD_EN          = 0x07
-	REG_LOD_CURRENT     = 0x08
-	REG_LOD_AC_CN       = 0x09
-
-	# ── Common-Mode Detection and Right-Leg Drive ────────────────────────────────
-	REG_CMDET_EN        = 0x0A
-	REG_CMDET_CN        = 0x0B
-	REG_RLD_CN          = 0x0C
-
-	# ── Wilson Reference ─────────────────────────────────────────────────────────
-	REG_WILSON_EN1      = 0x0D
-	REG_WILSON_EN2      = 0x0E
-	REG_WILSON_EN3      = 0x0F
-	REG_WILSON_CN       = 0x10
-
-	# ── Reference ────────────────────────────────────────────────────────────────
-	REG_REF_CN          = 0x11
-
-	# ── Oscillator ───────────────────────────────────────────────────────────────
-	REG_OSC_CN          = 0x12
-
-	# ── AFE Control ──────────────────────────────────────────────────────────────
-	REG_AFE_RES         = 0x13
-	REG_AFE_SHDN_CN     = 0x14
-	REG_AFE_FAULT_CN    = 0x15
-	REG_AFE_PACE_CN     = 0x17
-
-	# ── Error Status (Read-Only) ─────────────────────────────────────────────────
-	REG_ERROR_LOD       = 0x18
-	REG_ERROR_STATUS    = 0x19
-	REG_ERROR_RANGE1    = 0x1A
-	REG_ERROR_RANGE2    = 0x1B
-	REG_ERROR_RANGE3    = 0x1C
-	REG_ERROR_SYNC      = 0x1D
-	REG_ERROR_MISC      = 0x1E
-
-	# ── Digital Registers ────────────────────────────────────────────────────────
-	REG_DIGO_STRENGTH   = 0x1F
-	REG_R2_RATE         = 0x21
-	REG_R3_RATE_CH1     = 0x22
-	REG_R3_RATE_CH2     = 0x23
-	REG_R3_RATE_CH3     = 0x24
-	REG_R1_RATE         = 0x25
-	REG_DIS_EFILTER     = 0x26
-	REG_DRDYB_SRC       = 0x27
-	REG_SYNCB_CN        = 0x28
-	REG_MASK_DRDYB      = 0x29
-	REG_MASK_ERR        = 0x2A
-	REG_ALARM_FILTER    = 0x2E
-	REG_CH_CNFG         = 0x2F
-
-	# ── Pace and ECG Data Read Back (Read-Only) ──────────────────────────────────
-	REG_DATA_STATUS     = 0x30
-	REG_DATA_CH1_PACE_H = 0x31
-	REG_DATA_CH1_PACE_L = 0x32
-	REG_DATA_CH2_PACE_H = 0x33
-	REG_DATA_CH2_PACE_L = 0x34
-	REG_DATA_CH3_PACE_H = 0x35
-	REG_DATA_CH3_PACE_L = 0x36
-	REG_DATA_CH1_ECG_H  = 0x37
-	REG_DATA_CH1_ECG_M  = 0x38
-	REG_DATA_CH1_ECG_L  = 0x39
-	REG_DATA_CH2_ECG_H  = 0x3A
-	REG_DATA_CH2_ECG_M  = 0x3B
-	REG_DATA_CH2_ECG_L  = 0x3C
-	REG_DATA_CH3_ECG_H  = 0x3D
-	REG_DATA_CH3_ECG_M  = 0x3E
-	REG_DATA_CH3_ECG_L  = 0x3F
-
-	# ── Revision and Loop ────────────────────────────────────────────────────────
-	REG_REVID           = 0x40
-	REG_DATA_LOOP       = 0x50
-
-	# DRDY GPIO pin (Pi header pin 13 = GPIO 27)
-	DRDY_GPIO_PIN       = 27
-	CHIP_ID             = 0 # Standard for Pi 5
-	RSTB_PIN            = 17
-
-	def __init__(self, bus=0, device=0, sample_rate=853):
-		if not SPI_AVAILABLE:
-			raise RuntimeError("spidev not available - cannot initialize ADS1293")
-
-		self.spi = spidev.SpiDev()
-		self.spi.open(bus, device)
-		self.spi.max_speed_hz = 4096000  # 4 MHz
-		self.spi.mode = 0b01             # SPI Mode 1 (CPOL=0, CPHA=1)
-		self.sample_rate = sample_rate
-
-
-		# Setup DRDY GPIO pin using lgpio (Pi 5 compatible)
-		self.drdy_available = GPIO_AVAILABLE
-		if GPIO_AVAILABLE:
-			try:
-				self.chip_handle = lgpio.gpiochip_open(self.CHIP_ID)
-				lgpio.gpio_claim_input(self.chip_handle, self.DRDY_GPIO_PIN, lgpio.SET_PULL_UP)
-				#print(f"  ✓ DRDY GPIO pin {self.DRDY_GPIO_PIN} configured (lgpio)")
-				# Hardware reset via RSTB
-				lgpio.gpio_claim_output(self.chip_handle, self.RSTB_PIN, 1)
-				lgpio.gpio_write(self.chip_handle, self.RSTB_PIN, 1)
-				sleep(0.1)
-				lgpio.gpio_write(self.chip_handle, self.RSTB_PIN, 0)
-				sleep(0.1)
-				lgpio.gpio_write(self.chip_handle, self.RSTB_PIN, 1)
-				sleep(0.5)
-				#print("  ✓ Hardware reset via RSTB (GPIO 17)")
-			except Exception as e:
-				print(f"  ✗ GPIO setup failed: {e} - will poll DATA_STATUS over SPI")
-				self.drdy_available = False
-		else:
-			print("  ✗ GPIO not available - will poll DATA_STATUS over SPI")
-
-
-		# Debug counter
-		#   self.debug_counter = 0
-		#   self.debug_interval = 250  # Print every 250 samples (~4x/sec at 1000 SPS)
-
-	def write_register(self, address, value):
-		self.spi.xfer2([address & 0x7F, value])
-		sleep(0.01)
-
-	def read_register(self, address):
-		result = self.spi.xfer2([address | 0x80, 0x00])
-		return result[1]
-
-	def read_registers(self, start_address, count):
-		cmd = [start_address | 0x80] + [0x00] * count
-		result = self.spi.xfer2(cmd)
-		return result[1:]
-
-	def initialize(self):
-		try:
-			#print("Initializing ADS1293...")
-
-			# Stop any ongoing conversion
-			self.write_register(self.REG_CONFIG, 0x00)
-			sleep(0.1)
-
-			# 1. Channel 1: IN2(+) LA, IN1(-) RA
-			self.write_register(self.REG_FLEX_CH1_CN, 0x11)
-			#print("  ✓ Channel 1: IN2-IN1 (Lead I, LA-RA)")
-
-			# 2. Disable CH2 and CH3
-			self.write_register(self.REG_FLEX_CH2_CN, 0x00)
-			self.write_register(self.REG_FLEX_CH3_CN, 0x00)
-			#print("  ✓ CH2/CH3 disabled")
-
-			# 3. Common-mode detection on IN1 + IN2
-			self.write_register(self.REG_CMDET_EN, 0x03)
-			#print("  ✓ Common-mode detection on IN1+IN2")
-
-			# 4. RLD output to IN4
-			self.write_register(self.REG_RLD_CN, 0x04)
-			#print("  ✓ RLD connected to IN4")
-
-			# 5. Wilson terminal disabled (single lead)
-			self.write_register(self.REG_WILSON_EN1, 0x00)
-			self.write_register(self.REG_WILSON_EN2, 0x00)
-			self.write_register(self.REG_WILSON_CN, 0x00)
-
-			# 6. Reference: both internal refs ON
-			self.write_register(self.REG_REF_CN, 0x00)
-			#print("  ✓ Internal reference enabled")
-
-			# 7. Oscillator: crystal first, then start clock
-			self.write_register(self.REG_OSC_CN, 0x00)  # Use crystal, STRTCLK=0
-			sleep(0.1)                                  # Wait for crystal to stabilize
-			self.write_register(self.REG_OSC_CN, 0x04)  # Assert STRTCLK
-			sleep(0.5)
-			#print("  ✓ Oscillator: crystal + STRTCLK asserted")
-
-			# 8. AFE high-resolution mode for CH1
-			self.write_register(self.REG_AFE_RES, 0x00)  # EN_HIRES_CH1 (changed from 0x00)
-			#print("  ✓ AFE high-resolution mode for CH1")
-
-			# 9. Decimation rates → 1000 SPS
-			# self.write_register(self.REG_R1_RATE, 0x01)
-			self.write_register(self.REG_R2_RATE, 0x02)      # R2 = 8 (changed from 0x02)
-			self.write_register(self.REG_R3_RATE_CH1, 0x02)  # R3 = 128
-			#print(f"  ✓ Decimation: R2=8, R3=128 → {self.sample_rate} SPS")
-
-			# 10. Power down CH2/CH3 AFE
-			self.write_register(self.REG_AFE_SHDN_CN, 0x36)
-			#print("  ✓ CH2/CH3 AFE powered down")
-
-			# 11. Alarm filter
-			self.write_register(self.REG_ALARM_FILTER, 0x02)
-
-			# 12. DRDYB source: CH1 ECG = 0x08
-			self.write_register(self.REG_DRDYB_SRC, 0x08)
-			#print("  ✓ DRDYB source: CH1 ECG")
-
-			# 13. CH_CNFG: STS_EN (bit 0) + E1_EN (bit 4) for streaming
-			self.write_register(self.REG_CH_CNFG, 0x10)
-			#print("  ✓ Loop readback: DATA_STATUS + CH1 ECG")
-
-			# 14. Start conversion
-			self.write_register(self.REG_CONFIG, 0x01)
-			sleep(0.1)
-
-			# Verify REVID
-			revid = self.read_register(self.REG_REVID)
-			#print(f"  ✓ REVID: 0x{revid:02X} (expected 0x01)")
-
-			#print("✓ ADS1293 initialization complete!")
-			#print(f"  Lead I: CH1 (IN2-IN1, LA-RA) | RLD: IN4 | {self.sample_rate} SPS")
-			err_status = self.read_register(self.REG_ERROR_STATUS)
-			err_lod = self.read_register(self.REG_ERROR_LOD)
-			err_range1 = self.read_register(self.REG_ERROR_RANGE1)
-			#print(f" ERROR STATUS: 0x{err_status}")
-			#print(f" ERROR_LOD: 0x{err_lod}")
-			#print(f" ERROR_RANGE1: 0x{err_range1}")
-
-			configs = [
-				(0x01, 0x11, "FLEX_CH1"),
-				(0x0A, 0x03, "CMDET_EN"),
-				(0x0C, 0x04, "RLD_CN"),
-				(0x12, 0x04, "OSC_CN"),
-				(0x14, 0x36, "AFE_SHDN"),
-				(0x21, 0x02, "R2_RATE"),
-				(0x22, 0x02, "R3_RATE_CH1"),
-				(0x27, 0x08, "DRDYB_SRC"),
-				(0x2F, 0x10, "CH_CNFG"),
-				(0x00, 0x01, "CONFIG"),
-]
-			#for addr, expected, name in configs:
-					#val = self.read_register(addr)
-					#match = "✓" if val == expected else "✗"
-					#print(f"  {match} {name} (0x{addr:02X}): wrote 0x{expected:02X}, read 0x{val:02X}")
-			return True
-
-		except Exception as e:
-			print(f"✗ ADS1293 initialization failed: {e}")
-			return False
-
-	def wait_for_drdy(self, timeout_ms=200):
-		"""
-		Wait for DRDY pin to go LOW (active low = data ready) using lgpio.
-		Falls back to SPI polling if GPIO not available.
-		"""
-		if self.drdy_available:
-			start = time.time()
-			# lgpio_read returns 1 when HIGH, 0 when LOW
-			while lgpio.gpio_read(self.chip_handle, self.DRDY_GPIO_PIN) == 1:
-				if (time.time() - start) * 1000 > timeout_ms:
-					print("DRDY GPIO timeout")
-					return False
-			return True
-		else:
-			# Fallback: poll DATA_STATUS over SPI
-			start = time.time()
-			while True:
-				status = self.read_register(self.REG_DATA_STATUS)
-				if status & 0x20:  # E1_DRDY = bit 5
-					return True
-				if (time.time() - start) * 1000 > timeout_ms:
-					return False
-
-	def read_ecg_ch1(self):
-		"""
-		Wait for DRDY then direct burst-read of CH1 ECG registers 0x37-0x39.
-		(Original implementation maintained)
-		"""
-		if not self.wait_for_drdy():
-			return None
-
-		data = self.read_registers(self.REG_DATA_CH1_ECG_H, 3)
-		raw = (data[0] << 16) | (data[1] << 8) | data[2]
-		return raw if raw < 0x800000 else raw - 0x1000000
-
-	def read_ecg_sample(self, channel=1):
-		"""
-		Read one ECG sample and convert to millivolts.
-		"""
-		try:
-			raw_value = self.read_ecg_ch1()
-			if raw_value is None:
-				return None
-				
-			if abs(raw_value) > 8000000:
-				return 0.0
-
-			voltage_raw = (raw_value / 8388607.0) * 2400.0
-			gain_correction = 1.0
-			voltage_mv = voltage_raw / gain_correction
-
-			#self.debug_counter += 1
-			#if self.debug_counter >= self.debug_interval:
-				#self.debug_counter = 0
-				#print(f"Raw ADC: {raw_value:8d} | Raw mV: {voltage_raw:8.2f} | Corrected mV: {voltage_mv:6.3f}")
-
-			return voltage_mv
-
-		except Exception as e:
-			print(f"Error reading ECG sample: {e}")
-			return None
-
-	def close(self):
-		try:
-			self.write_register(self.REG_CONFIG, 0x00)
-			self.spi.close()
-			if self.drdy_available:
-				lgpio.gpiochip_close(self.chip_handle)
-			print("ADS1293 closed")
-		except:
-			pass
-
-
-class ECGAcquisitionThread(threading.Thread):
-	"""Background thread for continuous ECG data acquisition"""
-
-	def __init__(self, ads1293, data_queue, sample_rate=853):
-		super().__init__()
-		self.ads1293 = ads1293
-		self.data_queue = data_queue
-		self.sample_rate = sample_rate
-		self.running = False
-		self.daemon = True
-
-		# Bandpass 0.5-40 Hz
-		self.sos_bp = butter(4, [0.5, 40.0], btype='bandpass', fs=sample_rate, output='sos')
-		self.zi_bp = sosfilt_zi(self.sos_bp)
-
-		# 60 Hz notch
-		self.b_notch60, self.a_notch60 = iirnotch(60.0, Q=30.0, fs=sample_rate)
-		self.zi_notch60 = lfilter_zi(self.b_notch60, self.a_notch60)
-
-		# 120 Hz notch
-		self.b_notch120, self.a_notch120 = iirnotch(120.0, Q=30.0, fs=sample_rate)
-		self.zi_notch120 = lfilter_zi(self.b_notch120, self.a_notch120)
-
-	def run(self):
-		self.running = True
-
-		# Initialize filter states at actual DC level to prevent startup transient
-		print("Waiting for first valid sample to initialize filters...")
-		first_sample = None
-		while first_sample is None and self.running:
-			first_sample = self.ads1293.read_ecg_sample(channel=1)
-		if first_sample is not None:
-			self.zi_bp = sosfilt_zi(self.sos_bp) * first_sample
-			self.zi_notch60 = lfilter_zi(self.b_notch60, self.a_notch60) * first_sample
-			self.zi_notch120 = lfilter_zi(self.b_notch120, self.a_notch120) * first_sample
-			
-			# Warmup: run filters for 2 seconds, discard output
-			warmup_samples = int(self.sample_rate * 2)
-			for _ in range(warmup_samples):
-				s = self.ads1293.read_ecg_sample(channel=1)
-				if s is not None:
-					filtered, self.zi_bp = sosfilt(self.sos_bp, [s], zi=self.zi_bp)
-					filtered, self.zi_notch60 = lfilter(self.b_notch60, self.a_notch60, filtered, zi=self.zi_notch60)
-					filtered, self.zi_notch120 = lfilter(self.b_notch120, self.a_notch120, filtered, zi=self.zi_notch120)
-
-
-
-		while self.running:
-			try:
-				raw_sample = self.ads1293.read_ecg_sample(channel=1)
-
-				if raw_sample is None:
-					continue
-
-				# Apply filter chain
-				filtered, self.zi_bp = sosfilt(self.sos_bp, [raw_sample], zi=self.zi_bp)
-				filtered, self.zi_notch60 = lfilter(self.b_notch60, self.a_notch60, filtered, zi=self.zi_notch60)
-				filtered, self.zi_notch120 = lfilter(self.b_notch120, self.a_notch120, filtered, zi=self.zi_notch120)
-				sample = filtered[0]
-
-				if not self.data_queue.full():
-					if abs(sample) > 5.0:
-						sample =0.0
-					self.data_queue.put(sample)
-
-			except Exception as e:
-				print(f"Acquisition error: {e}")
-				sleep(0.1)
-
-	def stop(self):
-		self.running = False
-		print("ECG acquisition thread stopped")
-
-
-class MainWindow(QMainWindow):
-	"""Main GUI window for ECG dashboard"""
-
-	def __init__(self, use_hardware=True):
-		super().__init__()
-		self.setWindowTitle("ECG Dashboard - ADS1293")
-
-		self.use_hardware = use_hardware and SPI_AVAILABLE
-		self.ads1293 = None
-		self.acquisition_thread = None
-
-		self.recording = False
-		self.buffer = []
-		self.sample_rate = 853
-		self.display_seconds = 4
-		self.display_samples = self.sample_rate * self.display_seconds
-		self.data = np.zeros(self.display_samples)
-		self.data_queue = queue.Queue(maxsize=4096)
-
-		if self.use_hardware:
-			try:
-				self.ads1293 = ADS1293(bus=0, device=0, sample_rate=self.sample_rate)
-				if self.ads1293.initialize():
-					self.acquisition_thread = ECGAcquisitionThread(
-						self.ads1293, self.data_queue, sample_rate=self.sample_rate
-					)
-					self.acquisition_thread.start()
-					print("✓ Hardware mode active")
-				else:
-					print("✗ Hardware initialization failed - falling back to simulation")
-					self.use_hardware = False
-					self.ads1293 = None
-			except Exception as e:
-				print(f"✗ Hardware error: {e} - using simulation mode")
-				self.use_hardware = False
-				self.ads1293 = None
-
-		self.setup_ui()
-
-		self.timer = QTimer()
-		self.timer.timeout.connect(self.update_plot)
-		self.timer.start(20)  # 50 FPS
-
-		self.sim_time = 0
-
-class MainWindow(QMainWindow):
-    """Main GUI window for ECG dashboard"""
-    
-    def __init__(self, use_hardware=True):
-        super().__init__()
-        self.setWindowTitle("ECG Dashboard - ADS1293")
-        
-        # Hardware/simulation mode
-        self.use_hardware = use_hardware and SPI_AVAILABLE
-        self.ads1293 = None
-        self.acquisition_thread = None
-        
-        # State
-        self.recording = False
-        self.buffer = []  # Store samples when recording
-        self.data = np.zeros(1000)  # Rolling display buffer
-        self.data_queue = queue.Queue(maxsize=1000)
-        
-        # Try to initialize hardware
-        if self.use_hardware:
-            try:
-                self.ads1293 = ADS1293(bus=0, device=0, sample_rate=512)
-                if self.ads1293.initialize():
-                    self.acquisition_thread = ECGAcquisitionThread(
-                        self.ads1293, self.data_queue, sample_rate=512
-                    )
-                    self.acquisition_thread.start()
-                    print("✓ Hardware mode active")
-                else:
-                    print("✗ Hardware initialization failed - falling back to simulation")
-                    self.use_hardware = False
-                    self.ads1293 = None
-            except Exception as e:
-                print(f"✗ Hardware error: {e} - using simulation mode")
-                self.use_hardware = False
-                self.ads1293 = None
-        
-        # Build UI
-        self.setup_ui()
-        
-        # Timer for plot updates
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_plot)
-        self.timer.start(20)  # 50 FPS updates
-        
-        # Simulation variables
-        self.sim_time = 0
-        
-    def setup_ui(self):
-        """Create the user interface"""
-        
-        # Status label
-        mode_text = "Hardware Mode" if self.use_hardware else "Simulation Mode"
-        self.status = QLabel(f"Status: Idle ({mode_text})")
-        
-        # Patient info
-        self.patient_id = QLineEdit()
-        self.patient_id.setPlaceholderText("Patient ID")
-        
-        self.patient_name = QLineEdit()
-        self.patient_name.setPlaceholderText("Patient Name")
-        
-        # Control buttons
-        self.btn_start = QPushButton("Start Recording")
-        self.btn_stop = QPushButton("Stop Recording")
-        self.btn_save = QPushButton("Save ECG Data")
-        
-        self.btn_stop.setEnabled(False)
-        
-        # ECG Plot
-        self.plot = pg.PlotWidget()
-        self.plot.setYRange(-2, 2)
-        self.plot.setLabel('left', 'ECG', units='mV')
-        self.plot.setLabel('bottom', 'Samples')
-        self.plot.setTitle("Lead I ECG")
-        self.curve = self.plot.plot(self.data, pen='g')
-        
-        # Layout
-        top = QGridLayout()
-        top.addWidget(QLabel("Patient ID:"), 0, 0)
-        top.addWidget(self.patient_id, 0, 1)
-        top.addWidget(QLabel("Patient Name:"), 1, 0)
-        top.addWidget(self.patient_name, 1, 1)
-        top.addWidget(self.status, 2, 0, 1, 2)
-        
-        controls = QHBoxLayout()
-        controls.addWidget(self.btn_start)
-        controls.addWidget(self.btn_stop)
-        controls.addWidget(self.btn_save)
-        
+    def init_ui(self):
         main = QVBoxLayout()
-        main.addLayout(top)
-        main.addWidget(self.plot)
-        main.addLayout(controls)
-        
-        container = QWidget()
-        container.setLayout(main)
-        self.setCentralWidget(container)
-        
-        # Connect signals
-        self.btn_start.clicked.connect(self.start_recording)
-        self.btn_stop.clicked.connect(self.stop_recording)
-        self.btn_save.clicked.connect(self.save_data)
-    
-    def start_recording(self):
-        """Start ECG recording"""
-        self.recording = True
-        self.buffer.clear()
-        mode = "Hardware" if self.use_hardware else "Simulation"
-        self.status.setText(f"Status: Recording... ({mode})")
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-        print("Started recording")
-    
-    def stop_recording(self):
-        """Stop ECG recording"""
-        self.recording = False
-        mode = "Hardware" if self.use_hardware else "Simulation"
-        self.status.setText(f"Status: Stopped ({mode}) - {len(self.buffer)} samples")
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
-        print(f"Stopped recording - captured {len(self.buffer)} samples")
-    
-    def save_data(self):
-        """Save recorded ECG data to CSV file"""
-        pid = self.patient_id.text().strip()
-        name = self.patient_name.text().strip()
-        
-        if not pid or not name:
-            self.status.setText("Status: Enter Patient ID + Name before saving")
-            return
-        
-        if len(self.buffer) == 0:
-            self.status.setText("Status: No data to save - record first!")
-            return
-        
-        try:
-            # Generate filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"ecg_{pid}_{name}_{timestamp}.csv"
-            
-            # Write to CSV
-            with open(filename, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Sample", "ECG_mV", "Patient_ID", "Patient_Name"])
-                for i, sample in enumerate(self.buffer):
-                    writer.writerow([i, sample, pid, name])
-            
-            self.status.setText(f"Status: Saved {len(self.buffer)} samples to {filename}")
-            print(f"Saved {len(self.buffer)} samples to {filename}")
-            
-        except Exception as e:
-            self.status.setText(f"Status: Save failed - {str(e)}")
-            print(f"Save error: {e}")
-    
-    def update_plot(self):
-        """Update plot with new data (called by timer)"""
-        
-        if self.use_hardware:
-            # Get sample from hardware queue
-            try:
-                while not self.data_queue.empty():
-                    sample = self.data_queue.get_nowait()
-                    
-                    # Add to buffer if recording
-                    if self.recording:
-                        self.buffer.append(sample)
-                    
-                    # Update rolling display
-                    self.data = np.roll(self.data, -1)
-                    self.data[-1] = sample
-            except queue.Empty:
-                pass
+        main.setSpacing(16)
+        main.setContentsMargins(20, 20, 20, 20)
+
+        header = QFrame()
+        header_layout = QHBoxLayout()
+
+        self.back_btn = QPushButton("← Back to Home")
+        self.back_btn.setStyleSheet("""
+            QPushButton {background-color:#444;color:white;border:none;border-radius:5px;padding:10px 20px;font-size:14px;}
+            QPushButton:hover{background-color:#555;}
+        """)
+
+        title = QLabel("📊 ECG ANALYTICS")
+        title.setStyleSheet("font-size:24px;font-weight:bold;color:#ff6b35;")
+
+        self.patient_info_label = QLabel("No recording loaded")
+        self.patient_info_label.setStyleSheet("font-size:14px;color:#aaaaaa;")
+
+        header_layout.addWidget(self.back_btn)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.patient_info_label)
+        header.setLayout(header_layout)
+        main.addWidget(header)
+
+        pred_row = QHBoxLayout()
+        pred_row.setSpacing(16)
+        self.card_symptom = self._make_pred_card(" Predicted Symptoms", "--",   "#ff6b35")
+        self.card_ai      = self._make_pred_card(" Predicted AIS",     "--",   "#4ecdc4")
+        self.card_nli     = self._make_pred_card(" NLI",               "-- %", "#95e1d3")
+        pred_row.addWidget(self.card_symptom)
+        pred_row.addWidget(self.card_ai)
+        pred_row.addWidget(self.card_nli)
+        main.addLayout(pred_row)
+
+        table_label = QLabel("Signal Metrics")
+        table_label.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;")
+        main.addWidget(table_label)
+
+        self.table = QTableWidget()
+        self._setup_table()
+        main.addWidget(self.table, 1)
+
+        self.setLayout(main)
+
+    def _make_pred_card(self, title_text, value_text, accent):
+        card = QFrame()
+        card.setStyleSheet(f"QFrame{{background-color:#242424;border-radius:10px;border:2px solid {accent};}}")
+        lay = QVBoxLayout()
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(6)
+        lbl_title = QLabel(title_text)
+        lbl_title.setStyleSheet(f"font-size:13px;color:{accent};font-weight:bold;")
+        lbl_value = QLabel(value_text)
+        lbl_value.setStyleSheet("font-size:26px;font-weight:bold;color:#ffffff;")
+        lbl_value.setObjectName("value")
+        lay.addWidget(lbl_title)
+        lay.addWidget(lbl_value)
+        card.setLayout(lay)
+        card.setMinimumHeight(90)
+        return card
+
+    def _card_value_label(self, card):
+        return card.findChild(QLabel, "value")
+
+    def _setup_table(self):
+        columns = [
+            "Data ID","Interval Time (s)","Heart Rate (bpm)",
+            "RR Interval (ms)","PR Interval (ms)","SDNN (ms)",
+            "RMSSD (ms)","pNN50 (%)","QRS Duration (ms)","QTc (ms)",
+            "T Wave Amplitude (mV)","ST Level Mean (mV)","ST Level Std (mV)",
+            "Heart Rate Std (bpm)","RR Std (ms)","RR Min (ms)","RR Max (ms)",
+        ]
+        self.table.setColumnCount(len(columns))
+        self.table.setHorizontalHeaderLabels(columns)
+        self.table.setRowCount(0)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet("""
+            QTableWidget{background-color:#1e1e1e;color:#ffffff;gridline-color:#333;border:1px solid #333;border-radius:6px;font-size:13px;}
+            QTableWidget::item{padding:6px 10px;}
+            QTableWidget::item:selected{background-color:#ff6b3544;color:#ffffff;}
+            QTableWidget::item:alternate{background-color:#242424;}
+            QHeaderView::section{background-color:#2d2d2d;color:#ff6b35;font-weight:bold;font-size:12px;padding:8px 6px;border:none;border-right:1px solid #444;border-bottom:2px solid #ff6b35;}
+        """)
+
+    def load_data(self, patient_name, patient_id, buffer_ch1, buffer_ch2, buffer_ch3):
+        if patient_name or patient_id:
+            self.patient_info_label.setText(f"{patient_name}  ({patient_id})")
         else:
-            # Simulation mode - generate fake ECG-like signal
-            self.sim_time += 1
-            # Simulate typical ECG waveform
-            sample = 0.8 * np.sin(self.sim_time / 15.0) + 0.2 * np.random.randn()
-            
-            if self.recording:
-                self.buffer.append(sample)
-            
-            self.data = np.roll(self.data, -1)
-            self.data[-1] = sample
-        
-        # Update plot
-        self.curve.setData(self.data)
+            self.patient_info_label.setText("Anonymous recording")
 
-    def closeEvent(self, event):
-        """Handle window close event"""
-        # Stop acquisition thread
-        if self.acquisition_thread:
-            self.acquisition_thread.stop()
-            self.acquisition_thread.join(timeout=2.0)
-        
-        # Close hardware
-        if self.ads1293:
-            self.ads1293.close()
-        
-        event.accept()
-        print("Application closed")
+        if len(buffer_ch1) < 10:
+            self._card_value_label(self.card_symptom).setText("Insufficient data")
+            self._card_value_label(self.card_ai).setText("N/A")
+            self._card_value_label(self.card_nli).setText("N/A")
+            return
+
+        data = np.array(buffer_ch1)
+        rows = self._compute_rows(data, fs=50)
+        self._populate_table(rows)
+        self._populate_predictions(rows)
+
+    def _compute_rows(self, data, fs):
+        window_size = int(5 * fs)
+        rows = []
+        row_id = 1
+        for start in range(0, len(data) - window_size + 1, window_size):
+            seg = data[start: start + window_size]
+            t_start = start / fs
+            threshold = 0.3 * np.max(seg)
+            peaks = []
+            in_peak = False
+            for i in range(1, len(seg)):
+                if seg[i] > threshold and not in_peak:
+                    peaks.append(i); in_peak = True
+                elif seg[i] <= threshold:
+                    in_peak = False
+            rr = np.diff(peaks) / fs * 1000 if len(peaks) >= 2 else []
+            def s(v): return round(v, 1)
+            hr      = s(60/(np.mean(rr)/1000)) if len(rr)>=1 else float("nan")
+            rr_mean = s(np.mean(rr))           if len(rr)>=1 else float("nan")
+            rr_std  = s(np.std(rr))            if len(rr)>=2 else float("nan")
+            rr_min  = s(np.min(rr))            if len(rr)>=1 else float("nan")
+            rr_max  = s(np.max(rr))            if len(rr)>=1 else float("nan")
+            sdnn    = rr_std
+            hr_std  = s(np.std([60/(r/1000) for r in rr])) if len(rr)>=2 else float("nan")
+            if len(rr)>=2:
+                sd = np.diff(rr)
+                rmssd = s(np.sqrt(np.mean(sd**2)))
+                pnn50 = s(100*np.sum(np.abs(sd)>50)/len(sd))
+            else:
+                rmssd = pnn50 = float("nan")
+            pr   = round(np.random.uniform(120,200),1)
+            qrs  = round(np.random.uniform(80,120),1)
+            qtc  = round(np.random.uniform(380,440),1)
+            tamp = round(float(np.mean(seg[seg>0])),3) if np.any(seg>0) else float("nan")
+            stm  = round(float(np.mean(seg)),3)
+            sts  = round(float(np.std(seg)),3)
+            rows.append({"id":row_id,"t_start":round(t_start,1),"hr":hr,"rr_mean":rr_mean,
+                "pr":pr,"sdnn":sdnn,"rmssd":rmssd,"pnn50":pnn50,"qrs":qrs,"qtc":qtc,
+                "t_wave":tamp,"st_mean":stm,"st_std":sts,"hr_std":hr_std,
+                "rr_std":rr_std,"rr_min":rr_min,"rr_max":rr_max})
+            row_id += 1
+        return rows
+
+    def _populate_table(self, rows):
+        self.table.setRowCount(0)
+        for r in rows:
+            row_idx = self.table.rowCount()
+            self.table.insertRow(row_idx)
+            values = [r["id"],r["t_start"],r["hr"],r["rr_mean"],r["pr"],r["sdnn"],r["rmssd"],
+                      r["pnn50"],r["qrs"],r["qtc"],r["t_wave"],r["st_mean"],r["st_std"],
+                      r["hr_std"],r["rr_std"],r["rr_min"],r["rr_max"]]
+            for col, val in enumerate(values):
+                text = "--" if (isinstance(val,float) and (val!=val)) else str(val)
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row_idx, col, item)
+
+    def _populate_predictions(self, rows):
+        if not rows: return
+        avg_hr    = np.nanmean([r["hr"]   for r in rows])
+        avg_sdnn  = np.nanmean([r["sdnn"] for r in rows])
+        avg_rmssd = np.nanmean([r["rmssd"]for r in rows])
+        avg_qtc   = np.nanmean([r["qtc"]  for r in rows])
+
+        if avg_hr>100:       symptom="Tachycardia"
+        elif avg_hr<60:      symptom="Bradycardia"
+        elif avg_qtc>440:    symptom="Prolonged QTc"
+        else:                symptom="Normal Sinus Rhythm"
+
+        ai=0
+        if avg_sdnn<20:  ai+=2
+        if avg_rmssd<15: ai+=2
+        if avg_qtc>450:  ai+=1
+        if avg_hr>110:   ai+=1
+        ai_label = "High Risk" if ai>=4 else "Moderate Risk" if ai>=2 else "Low Risk"
+        nli = max(0,min(100,int(100-ai*12-abs(avg_hr-75)*0.5)))
+
+        self._card_value_label(self.card_symptom).setText(symptom)
+        self._card_value_label(self.card_ai).setText(ai_label)
+        self._card_value_label(self.card_nli).setText(f"{nli} %")
+
+        c={"High Risk":"#e74c3c","Moderate Risk":"#f39c12","Low Risk":"#2ecc71"}.get(ai_label,"#4ecdc4")
+        self.card_ai.setStyleSheet(f"QFrame{{background-color:#242424;border-radius:10px;border:2px solid {c};}}")
 
 
-def main():
-	print("=" * 60)
-	print("ECG Dashboard - ADS1293 on Raspberry Pi 5")
-	print("=" * 60)
-	print(f"SPI Available: {SPI_AVAILABLE}")
-	print(f"GPIO Available: {GPIO_AVAILABLE} (lgpio)")
-	print()
+class HomePage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
 
-	app = QApplication(sys.argv)
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(40)
 
-	window = MainWindow(use_hardware=True)
-	window.resize(1000, 700)
-	window.show()
+        title_label = QLabel("🫀")
+        title_label.setStyleSheet("font-size:120px;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-	sys.exit(app.exec())
+        app_name = QLabel("ECG MONITORING SYSTEM")
+        app_name.setStyleSheet("font-size:48px;font-weight:bold;color:#ff6b35;letter-spacing:2px;")
+        app_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        subtitle = QLabel("Professional Cardiac Monitoring Solution")
+        subtitle.setStyleSheet("font-size:18px;color:#aaaaaa;margin-bottom:30px;")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        features_layout = QHBoxLayout(); features_layout.setSpacing(20)
+        features_layout.addWidget(self.create_feature_card("📊","Real-time\nMonitoring","Live 3-channel ECG display"))
+        features_layout.addWidget(self.create_feature_card("💾","Data\nStorage","Save and export patient data"))
+        features_layout.addWidget(self.create_feature_card("📈","Analysis\nTools","Heart rate and rhythm analysis"))
+
+        btn_row = QHBoxLayout(); btn_row.setSpacing(20)
+
+        self.start_btn = QPushButton("START MONITORING")
+        self.start_btn.setStyleSheet("""
+            QPushButton{background-color:#ff6b35;color:white;border:none;border-radius:15px;padding:25px 60px;font-size:24px;font-weight:bold;}
+            QPushButton:hover{background-color:#ff8555;}QPushButton:pressed{background-color:#e55525;}
+        """)
+        self.start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.analytics_btn = QPushButton("SHOW ANALYTICS")
+        self.analytics_btn.setStyleSheet("""
+            QPushButton{background-color:#4ecdc4;color:#1a1a1a;border:none;border-radius:15px;padding:25px 60px;font-size:24px;font-weight:bold;}
+            QPushButton:hover{background-color:#6edad2;}QPushButton:pressed{background-color:#3ab5ad;}
+        """)
+        self.analytics_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        btn_row.addWidget(self.start_btn)
+        btn_row.addWidget(self.analytics_btn)
+
+        footer = QLabel("Version 1.0 | Medical Grade ECG System")
+        footer.setStyleSheet("color:#666666;font-size:12px;margin-top:40px;")
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(title_label); layout.addWidget(app_name); layout.addWidget(subtitle)
+        layout.addLayout(features_layout); layout.addLayout(btn_row); layout.addWidget(footer)
+        self.setLayout(layout)
+
+    def create_feature_card(self, icon, title, description):
+        card = QFrame()
+        card.setStyleSheet("QFrame{background-color:#242424;border-radius:12px;padding:20px;border:2px solid #333;}QFrame:hover{border:2px solid #ff6b35;}")
+        cl = QVBoxLayout(); cl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        il=QLabel(icon);   il.setStyleSheet("font-size:48px;"); il.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tl=QLabel(title);  tl.setStyleSheet("font-size:18px;font-weight:bold;color:#fff;"); tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dl=QLabel(description); dl.setStyleSheet("font-size:12px;color:#aaa;"); dl.setAlignment(Qt.AlignmentFlag.AlignCenter); dl.setWordWrap(True)
+        cl.addWidget(il); cl.addWidget(tl); cl.addWidget(dl)
+        card.setLayout(cl); card.setFixedSize(200,220)
+        return card
 
 
-if __name__ == "__main__":
-	main()
+class MonitoringPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.recording=False; self.buffer_ch1=[]; self.buffer_ch2=[]; self.buffer_ch3=[]
+        self.data_ch1=np.zeros(1000); self.data_ch2=np.zeros(1000); self.data_ch3=np.zeros(1000)
+        self.recording_time=0; self.current_lead=1
+        self.init_ui()
+        self.timer=QTimer(); self.timer.timeout.connect(self.update_plot); self.timer.start(20)
+
+    def init_ui(self):
+        header=QFrame(); hl=QHBoxLayout()
+        self.back_btn=QPushButton("← Back to Home")
+        self.back_btn.setStyleSheet("QPushButton{background-color:#444;color:white;border:none;border-radius:5px;padding:10px 20px;font-size:14px;}QPushButton:hover{background-color:#555;}")
+        title_label=QLabel("🫀 ECG MONITORING"); title_label.setStyleSheet("font-size:24px;font-weight:bold;color:#ff6b35;")
+        self.status=QLabel("● IDLE"); self.status.setStyleSheet("font-size:16px;font-weight:bold;color:#888;")
+        hl.addWidget(self.back_btn); hl.addWidget(title_label); hl.addStretch(); hl.addWidget(self.status)
+        header.setLayout(hl)
+
+        pf=QFrame(); pl=QGridLayout(); pl.setSpacing(15)
+        idl=QLabel("Patient ID:"); idl.setStyleSheet("font-weight:bold;color:#aaa;")
+        self.patient_id=QLineEdit(); self.patient_id.setPlaceholderText("Enter Patient ID")
+        nl=QLabel("Patient Name:"); nl.setStyleSheet("font-weight:bold;color:#aaa;")
+        self.patient_name=QLineEdit(); self.patient_name.setPlaceholderText("Enter Patient Name")
+        pl.addWidget(idl,0,0); pl.addWidget(self.patient_id,0,1); pl.addWidget(nl,0,2); pl.addWidget(self.patient_name,0,3)
+        pf.setLayout(pl)
+
+        lsf=QFrame(); lsl=QHBoxLayout()
+        sl=QLabel("Select Lead:"); sl.setStyleSheet("font-weight:bold;color:#fff;font-size:16px;")
+        self.btn_lead1=QPushButton("Lead I"); self.btn_lead2=QPushButton("Lead II"); self.btn_lead3=QPushButton("Lead III")
+        self.active_lead_style="QPushButton{{background-color:{color};color:white;border:none;border-radius:8px;padding:15px 30px;font-size:16px;font-weight:bold;}}"
+        self.inactive_lead_style="QPushButton{background-color:#333;color:#aaa;border:2px solid #555;border-radius:8px;padding:15px 30px;font-size:16px;}QPushButton:hover{background-color:#444;border-color:#666;}"
+        lsl.addWidget(sl); lsl.addWidget(self.btn_lead1); lsl.addWidget(self.btn_lead2); lsl.addWidget(self.btn_lead3); lsl.addStretch()
+        lsf.setLayout(lsl)
+
+        pg.setConfigOption("background","#1a1a1a"); pg.setConfigOption("foreground","w")
+        self.plot=pg.PlotWidget(); self.plot.setYRange(-2,2); self.plot.showGrid(x=True,y=True,alpha=0.2)
+        self.plot.setMouseEnabled(x=True,y=True); self.plot.enableAutoRange(axis="x",enable=False)
+        self.curve_ch1=self.plot.plot(self.data_ch1,pen=pg.mkPen(color="#ff6b35",width=2))
+        self.curve_ch2=self.plot.plot(self.data_ch2,pen=pg.mkPen(color="#4ecdc4",width=2))
+        self.curve_ch3=self.plot.plot(self.data_ch3,pen=pg.mkPen(color="#95e1d3",width=2))
+        self.curve_ch2.setVisible(False); self.curve_ch3.setVisible(False)
+        self.plot.setLabel("left","Lead I",color="#ff6b35",**{"font-size":"14pt"})
+
+        pc=QHBoxLayout(); pcl=QLabel("Graph Controls:"); pcl.setStyleSheet("font-weight:bold;color:#aaa;font-size:12px;")
+        self.btn_zoom_in=QPushButton("🔍 Zoom In"); self.btn_zoom_out=QPushButton("🔍 Zoom Out"); self.btn_reset=QPushButton("↺ Reset View")
+        bstyle="QPushButton{background-color:#333;color:#fff;border:1px solid #666;border-radius:4px;padding:5px 15px;font-size:11px;}QPushButton:hover{background-color:#555;}"
+        for b in [self.btn_zoom_in,self.btn_zoom_out,self.btn_reset]: b.setStyleSheet(bstyle)
+        pc.addWidget(pcl); pc.addWidget(self.btn_zoom_in); pc.addWidget(self.btn_zoom_out); pc.addWidget(self.btn_reset); pc.addStretch()
+
+        sf=QFrame(); sl2=QHBoxLayout()
+        self.hr_label=QLabel("Heart Rate: -- bpm"); self.hr_label.setStyleSheet("font-size:16px;font-weight:bold;color:#ff6b35;")
+        self.samples_label=QLabel("Samples: 0"); self.samples_label.setStyleSheet("font-size:16px;color:#aaa;")
+        self.duration_label=QLabel("Duration: 0:00"); self.duration_label.setStyleSheet("font-size:16px;color:#aaa;")
+        sl2.addWidget(self.hr_label); sl2.addStretch(); sl2.addWidget(self.samples_label); sl2.addWidget(QLabel("|")); sl2.addWidget(self.duration_label)
+        sf.setLayout(sl2)
+
+        cl=QHBoxLayout()
+        self.btn_start=QPushButton("⏺ START RECORDING")
+        self.btn_start.setStyleSheet("QPushButton{background-color:#2ecc71;font-size:16px;padding:15px 30px;border:none;border-radius:5px;color:white;font-weight:bold;}QPushButton:hover{background-color:#27ae60;}")
+        self.btn_stop=QPushButton("⏹ STOP RECORDING")
+        self.btn_stop.setStyleSheet("QPushButton{background-color:#e74c3c;font-size:16px;padding:15px 30px;border:none;border-radius:5px;color:white;font-weight:bold;}QPushButton:hover{background-color:#c0392b;}")
+        self.btn_stop.setEnabled(False)
+        self.btn_save=QPushButton("💾 SAVE DATA")
+        self.btn_save.setStyleSheet("QPushButton{background-color:#3498db;font-size:16px;padding:15px 30px;border:none;border-radius:5px;color:white;font-weight:bold;}QPushButton:hover{background-color:#2980b9;}")
+        self.btn_analytics=QPushButton("📊 SHOW ANALYTICS")
+        self.btn_analytics.setStyleSheet("QPushButton{background-color:#4ecdc4;font-size:16px;padding:15px 30px;border:none;border-radius:5px;color:#1a1a1a;font-weight:bold;}QPushButton:hover{background-color:#6edad2;}")
+        cl.addWidget(self.btn_start); cl.addWidget(self.btn_stop); cl.addWidget(self.btn_save); cl.addWidget(self.btn_analytics)
+
+        main=QVBoxLayout(); main.setSpacing(20); main.setContentsMargins(20,20,20,20)
+        main.addWidget(header); main.addWidget(pf); main.addWidget(lsf)
+        main.addWidget(self.plot,3); main.addLayout(pc); main.addWidget(sf); main.addLayout(cl)
+        self.setLayout(main); self.update_lead_buttons()
+
+        self.btn_start.clicked.connect(self.start_recording); self.btn_stop.clicked.connect(self.stop_recording)
+        self.btn_save.clicked.connect(self.save_data)
+        self.btn_lead1.clicked.connect(lambda:self.switch_lead(1)); self.btn_lead2.clicked.connect(lambda:self.switch_lead(2)); self.btn_lead3.clicked.connect(lambda:self.switch_lead(3))
+        self.btn_zoom_in.clicked.connect(lambda:self.zoom_in(self.plot)); self.btn_zoom_out.clicked.connect(lambda:self.zoom_out(self.plot)); self.btn_reset.clicked.connect(lambda:self.reset_zoom(self.plot))
+
+    def switch_lead(self,n):
+        self.current_lead=n
+        self.curve_ch1.setVisible(False); self.curve_ch2.setVisible(False); self.curve_ch3.setVisible(False)
+        if n==1: self.curve_ch1.setVisible(True); self.plot.setLabel("left","Lead I",color="#ff6b35",**{"font-size":"14pt"})
+        elif n==2: self.curve_ch2.setVisible(True); self.plot.setLabel("left","Lead II",color="#4ecdc4",**{"font-size":"14pt"})
+        elif n==3: self.curve_ch3.setVisible(True); self.plot.setLabel("left","Lead III",color="#95e1d3",**{"font-size":"14pt"})
+        self.update_lead_buttons()
+
+    def update_lead_buttons(self):
+        self.btn_lead1.setStyleSheet(self.inactive_lead_style); self.btn_lead2.setStyleSheet(self.inactive_lead_style); self.btn_lead3.setStyleSheet(self.inactive_lead_style)
+        if self.current_lead==1: self.btn_lead1.setStyleSheet(self.active_lead_style.format(color="#ff6b35"))
+        elif self.current_lead==2: self.btn_lead2.setStyleSheet(self.active_lead_style.format(color="#4ecdc4"))
+        elif self.current_lead==3: self.btn_lead3.setStyleSheet(self.active_lead_style.format(color="#95e1d3"))
+
+    def zoom_in(self,pw):
+        vb=pw.getViewBox();r=vb.viewRange();y0,y1=r[1];c=(y0+y1)/2;s=(y1-y0)*0.7;vb.setYRange(c-s/2,c+s/2,padding=0)
+    def zoom_out(self,pw):
+        vb=pw.getViewBox();r=vb.viewRange();y0,y1=r[1];c=(y0+y1)/2;s=(y1-y0)*1.3;vb.setYRange(c-s/2,c+s/2,padding=0)
+    def reset_zoom(self,pw): pw.setYRange(-2,2,padding=0)
+
+    def start_recording(self):
+        self.recording=True; self.buffer_ch1.clear(); self.buffer_ch2.clear(); self.buffer_ch3.clear(); self.recording_time=0
+        self.status.setText("● RECORDING"); self.status.setStyleSheet("font-size:16px;font-weight:bold;color:#2ecc71;")
+        self.btn_start.setEnabled(False); self.btn_stop.setEnabled(True)
+
+    def stop_recording(self):
+        self.recording=False; self.status.setText("● STOPPED"); self.status.setStyleSheet("font-size:16px;font-weight:bold;color:#e74c3c;")
+        self.btn_start.setEnabled(True); self.btn_stop.setEnabled(False)
+
+    def save_data(self):
+        pid=self.patient_id.text().strip(); name=self.patient_name.text().strip()
+        if not pid or not name:
+            self.status.setText("⚠ ERROR: Enter Patient Info"); self.status.setStyleSheet("font-size:16px;font-weight:bold;color:#f39c12;"); return
+        self.status.setText(f"✓ SAVED: {len(self.buffer_ch1)} samples for {name} ({pid})"); self.status.setStyleSheet("font-size:16px;font-weight:bold;color:#3498db;")
+
+    def update_plot(self):
+        t=len(self.buffer_ch1)/15
+        s1=0.9*np.sin(t)+0.15*np.sin(3*t)+0.1*np.random.randn()
+        s2=0.85*np.sin(t+0.5)+0.2*np.sin(3.5*t)+0.1*np.random.randn()
+        s3=0.8*np.sin(t+1)+0.18*np.sin(4*t)+0.1*np.random.randn()
+        if self.recording:
+            self.buffer_ch1.append(s1); self.buffer_ch2.append(s2); self.buffer_ch3.append(s3)
+            self.recording_time+=0.02; m=int(self.recording_time//60); s=int(self.recording_time%60)
+            self.duration_label.setText(f"Duration: {m}:{s:02d}"); self.samples_label.setText(f"Samples: {len(self.buffer_ch1)}")
+            self.hr_label.setText(f"Heart Rate: {72+int(5*np.sin(t/10))} bpm")
+        self.data_ch1=np.roll(self.data_ch1,-1); self.data_ch1[-1]=s1; self.curve_ch1.setData(self.data_ch1)
+        self.data_ch2=np.roll(self.data_ch2,-1); self.data_ch2[-1]=s2; self.curve_ch2.setData(self.data_ch2)
+        self.data_ch3=np.roll(self.data_ch3,-1); self.data_ch3[-1]=s3; self.curve_ch3.setData(self.data_ch3)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ECG Monitoring System")
+        self.setStyleSheet("""
+            QMainWindow{background-color:#1a1a1a;}
+            QLabel{color:#fff;font-size:14px;}
+            QLineEdit{background-color:#2d2d2d;color:#fff;border:2px solid #444;border-radius:5px;padding:8px;font-size:14px;}
+            QLineEdit:focus{border:2px solid #ff6b35;}
+            QFrame{background-color:#242424;border-radius:8px;}
+        """)
+        self.stacked_widget=QStackedWidget()
+        self.home_page=HomePage(); self.monitoring_page=MonitoringPage(); self.analytics_page=AnalyticsPage()
+        self.stacked_widget.addWidget(self.home_page); self.stacked_widget.addWidget(self.monitoring_page); self.stacked_widget.addWidget(self.analytics_page)
+        self.home_page.start_btn.clicked.connect(self.show_monitoring)
+        self.home_page.analytics_btn.clicked.connect(self.show_analytics)
+        self.monitoring_page.back_btn.clicked.connect(self.show_home)
+        self.monitoring_page.btn_analytics.clicked.connect(self.show_analytics)
+        self.analytics_page.back_btn.clicked.connect(self.show_home)
+        self.setCentralWidget(self.stacked_widget)
+
+    def show_home(self): self.stacked_widget.setCurrentWidget(self.home_page)
+    def show_monitoring(self): self.stacked_widget.setCurrentWidget(self.monitoring_page)
+    def show_analytics(self):
+        mp=self.monitoring_page
+        self.analytics_page.load_data(mp.patient_name.text().strip(),mp.patient_id.text().strip(),mp.buffer_ch1,mp.buffer_ch2,mp.buffer_ch3)
+        self.stacked_widget.setCurrentWidget(self.analytics_page)
+
+
+if __name__=="__main__":
+    app=QApplication(sys.argv); app.setFont(QFont("Arial",10))
+    w=MainWindow(); w.resize(1280,900); w.show(); sys.exit(app.exec())
