@@ -571,7 +571,7 @@ class MainWindow(QMainWindow):
 			return
 
 		try:
-			timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+			timestamp = datetime.now().strftime("%Y%m%d_%")
 			filename = f"ecg_{pid}_{name}_{timestamp}.csv"
 
 			with open(filename, 'w', newline='') as f:
