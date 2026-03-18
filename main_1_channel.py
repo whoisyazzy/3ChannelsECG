@@ -823,7 +823,7 @@ class MainWindow(QMainWindow):
 		header.addWidget(self.status)
 
 		# ECG plot
-		pg.setConfigOption('background', '#0d1117')
+		pg.setConfigOption('background', '#000000')
 		pg.setConfigOption('foreground', '#8b9ab0')
 
 		self.plot = pg.PlotWidget()
@@ -833,11 +833,13 @@ class MainWindow(QMainWindow):
 		self.plot.showGrid(x=True, y=True, alpha=0.15)
 		self.plot.getPlotItem().getAxis('left').setTextPen('#8b9ab0')
 		self.plot.getPlotItem().getAxis('bottom').setTextPen('#8b9ab0')
+		self.plot.setMouseEnabled(x=False, y=False)
+		self.plot.getPlotItem().setMenuEnabled(False)
 
 		self.time_axis = np.linspace(0, self.display_seconds, self.display_samples)
 		self.curve = self.plot.plot(
 			self.time_axis, self.data,
-			pen=pg.mkPen(color='#00e5a0', width=1.5)
+			pen=pg.mkPen(color='#00ff00', width=1.5)
 		)
 
 		self.plot.setYRange(-0.7, 2.0)
