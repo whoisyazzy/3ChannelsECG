@@ -1,0 +1,20 @@
+Heart Rate (bpm)_mean
+Heart Rate Std (bpm)_mean
+RR Interval (ms)_mean
+RR Std (ms)_mean
+SDSD (ms)_mean
+SDNN (ms)_mean
+RMSSD (ms)_mean
+pNN50 (%)_mean
+PR Interval (ms)_mean
+PR Std (ms)_mean
+QRS Duration (ms)_mean
+QRS Std (ms)_mean
+QTc (ms)_mean
+QTc Std (ms)_mean
+T Wave Amplitude (mV)_mean
+T Wave Std (mV)_mean
+T Wave Min (mV)_mean
+T Wave Max (mV)_mean
+ST Level Mean (mV)_mean
+ST Level Std (mV)_mean

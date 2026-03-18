@@ -1,0 +1,40 @@
+VALIDATION RESULTS
+F1 micro        : 0.8036
+F1 macro        : 0.5546
+Subset accuracy : 0.6667
+
+                                 precision    recall  f1-score   support
+
+1 degree atrioventricular block       0.50      0.34      0.40       171
+                    ST-T Change       0.18      0.05      0.08       173
+              Sinus Bradycardia       0.97      0.96      0.97      2483
+             Sinus Irregularity       0.64      0.41      0.50       382
+              Sinus Tachycardia       0.90      0.89      0.89      1075
+   Supraventricular Tachycardia       0.62      0.44      0.52        99
+                  T wave Change       0.68      0.42      0.52      1055
+
+                      micro avg       0.87      0.75      0.80      5438
+                      macro avg       0.64      0.50      0.55      5438
+                   weighted avg       0.83      0.75      0.78      5438
+                    samples avg       0.83      0.79      0.79      5438
+
+TEST RESULTS
+F1 micro        : 0.8017
+F1 macro        : 0.5765
+Subset accuracy : 0.6587
+
+                                 precision    recall  f1-score   support
+
+1 degree atrioventricular block       0.57      0.39      0.46       171
+                    ST-T Change       0.36      0.13      0.19       173
+              Sinus Bradycardia       0.97      0.96      0.97      2484
+             Sinus Irregularity       0.59      0.35      0.44       383
+              Sinus Tachycardia       0.89      0.88      0.89      1075
+   Supraventricular Tachycardia       0.69      0.48      0.57        99
+                  T wave Change       0.68      0.42      0.52      1055
+
+                      micro avg       0.87      0.74      0.80      5440
+                      macro avg       0.68      0.52      0.58      5440
+                   weighted avg       0.84      0.74      0.78      5440
+                    samples avg       0.83      0.78      0.79      5440
+

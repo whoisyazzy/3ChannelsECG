@@ -1,0 +1,11 @@
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+wfdb
+neurokit2
+mffpy
+scikit-learn==1.7.2
+joblib
+tabulate
