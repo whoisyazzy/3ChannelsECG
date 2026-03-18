@@ -480,172 +480,207 @@ class MainWindow(QMainWindow):
 
 		self.sim_time = 0
 
-	def setup_ui(self):
-		mode_text = "Hardware Mode" if self.use_hardware else "Simulation Mode"
-		self.status = QLabel(f"Status: Idle ({mode_text})")
+class MainWindow(QMainWindow):
+    """Main GUI window for ECG dashboard"""
+    
+    def __init__(self, use_hardware=True):
+        super().__init__()
+        self.setWindowTitle("ECG Dashboard - ADS1293")
+        
+        # Hardware/simulation mode
+        self.use_hardware = use_hardware and SPI_AVAILABLE
+        self.ads1293 = None
+        self.acquisition_thread = None
+        
+        # State
+        self.recording = False
+        self.buffer = []  # Store samples when recording
+        self.data = np.zeros(1000)  # Rolling display buffer
+        self.data_queue = queue.Queue(maxsize=1000)
+        
+        # Try to initialize hardware
+        if self.use_hardware:
+            try:
+                self.ads1293 = ADS1293(bus=0, device=0, sample_rate=512)
+                if self.ads1293.initialize():
+                    self.acquisition_thread = ECGAcquisitionThread(
+                        self.ads1293, self.data_queue, sample_rate=512
+                    )
+                    self.acquisition_thread.start()
+                    print("✓ Hardware mode active")
+                else:
+                    print("✗ Hardware initialization failed - falling back to simulation")
+                    self.use_hardware = False
+                    self.ads1293 = None
+            except Exception as e:
+                print(f"✗ Hardware error: {e} - using simulation mode")
+                self.use_hardware = False
+                self.ads1293 = None
+        
+        # Build UI
+        self.setup_ui()
+        
+        # Timer for plot updates
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(20)  # 50 FPS updates
+        
+        # Simulation variables
+        self.sim_time = 0
+        
+    def setup_ui(self):
+        """Create the user interface"""
+        
+        # Status label
+        mode_text = "Hardware Mode" if self.use_hardware else "Simulation Mode"
+        self.status = QLabel(f"Status: Idle ({mode_text})")
+        
+        # Patient info
+        self.patient_id = QLineEdit()
+        self.patient_id.setPlaceholderText("Patient ID")
+        
+        self.patient_name = QLineEdit()
+        self.patient_name.setPlaceholderText("Patient Name")
+        
+        # Control buttons
+        self.btn_start = QPushButton("Start Recording")
+        self.btn_stop = QPushButton("Stop Recording")
+        self.btn_save = QPushButton("Save ECG Data")
+        
+        self.btn_stop.setEnabled(False)
+        
+        # ECG Plot
+        self.plot = pg.PlotWidget()
+        self.plot.setYRange(-2, 2)
+        self.plot.setLabel('left', 'ECG', units='mV')
+        self.plot.setLabel('bottom', 'Samples')
+        self.plot.setTitle("Lead I ECG")
+        self.curve = self.plot.plot(self.data, pen='g')
+        
+        # Layout
+        top = QGridLayout()
+        top.addWidget(QLabel("Patient ID:"), 0, 0)
+        top.addWidget(self.patient_id, 0, 1)
+        top.addWidget(QLabel("Patient Name:"), 1, 0)
+        top.addWidget(self.patient_name, 1, 1)
+        top.addWidget(self.status, 2, 0, 1, 2)
+        
+        controls = QHBoxLayout()
+        controls.addWidget(self.btn_start)
+        controls.addWidget(self.btn_stop)
+        controls.addWidget(self.btn_save)
+        
+        main = QVBoxLayout()
+        main.addLayout(top)
+        main.addWidget(self.plot)
+        main.addLayout(controls)
+        
+        container = QWidget()
+        container.setLayout(main)
+        self.setCentralWidget(container)
+        
+        # Connect signals
+        self.btn_start.clicked.connect(self.start_recording)
+        self.btn_stop.clicked.connect(self.stop_recording)
+        self.btn_save.clicked.connect(self.save_data)
+    
+    def start_recording(self):
+        """Start ECG recording"""
+        self.recording = True
+        self.buffer.clear()
+        mode = "Hardware" if self.use_hardware else "Simulation"
+        self.status.setText(f"Status: Recording... ({mode})")
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        print("Started recording")
+    
+    def stop_recording(self):
+        """Stop ECG recording"""
+        self.recording = False
+        mode = "Hardware" if self.use_hardware else "Simulation"
+        self.status.setText(f"Status: Stopped ({mode}) - {len(self.buffer)} samples")
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        print(f"Stopped recording - captured {len(self.buffer)} samples")
+    
+    def save_data(self):
+        """Save recorded ECG data to CSV file"""
+        pid = self.patient_id.text().strip()
+        name = self.patient_name.text().strip()
+        
+        if not pid or not name:
+            self.status.setText("Status: Enter Patient ID + Name before saving")
+            return
+        
+        if len(self.buffer) == 0:
+            self.status.setText("Status: No data to save - record first!")
+            return
+        
+        try:
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"ecg_{pid}_{name}_{timestamp}.csv"
+            
+            # Write to CSV
+            with open(filename, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Sample", "ECG_mV", "Patient_ID", "Patient_Name"])
+                for i, sample in enumerate(self.buffer):
+                    writer.writerow([i, sample, pid, name])
+            
+            self.status.setText(f"Status: Saved {len(self.buffer)} samples to {filename}")
+            print(f"Saved {len(self.buffer)} samples to {filename}")
+            
+        except Exception as e:
+            self.status.setText(f"Status: Save failed - {str(e)}")
+            print(f"Save error: {e}")
+    
+    def update_plot(self):
+        """Update plot with new data (called by timer)"""
+        
+        if self.use_hardware:
+            # Get sample from hardware queue
+            try:
+                while not self.data_queue.empty():
+                    sample = self.data_queue.get_nowait()
+                    
+                    # Add to buffer if recording
+                    if self.recording:
+                        self.buffer.append(sample)
+                    
+                    # Update rolling display
+                    self.data = np.roll(self.data, -1)
+                    self.data[-1] = sample
+            except queue.Empty:
+                pass
+        else:
+            # Simulation mode - generate fake ECG-like signal
+            self.sim_time += 1
+            # Simulate typical ECG waveform
+            sample = 0.8 * np.sin(self.sim_time / 15.0) + 0.2 * np.random.randn()
+            
+            if self.recording:
+                self.buffer.append(sample)
+            
+            self.data = np.roll(self.data, -1)
+            self.data[-1] = sample
+        
+        # Update plot
+        self.curve.setData(self.data)
 
-		self.patient_id = QLineEdit()
-		self.patient_id.setPlaceholderText("Patient ID")
-
-		self.patient_name = QLineEdit()
-		self.patient_name.setPlaceholderText("Patient Name")
-
-		self.btn_start = QPushButton("Start Recording")
-		self.btn_stop = QPushButton("Stop Recording")
-		self.btn_save = QPushButton("Save ECG Data")
-		self.btn_process = QPushButton("Process")
-		self.btn_stop.setEnabled(False)
-
-		self.plot = pg.PlotWidget()
-		self.plot.setLabel('left', 'ECG (mV)')
-		self.plot.setLabel('bottom', 'Time (s)')
-		self.plot.setTitle("Lead I ECG - ADS1293 (1000 SPS)")
-		self.plot.showGrid(x=True, y=True, alpha=0.3)
-
-		self.time_axis = np.linspace(0, self.display_seconds, self.display_samples)
-		self.curve = self.plot.plot(self.time_axis, self.data, pen=pg.mkPen('g', width=1))
-
-		self.plot.setYRange(-0.7, 2.0)
-		self.plot.setXRange(0, self.display_seconds)
-		#self.plot.enableAutoRange(axis="y")
-
-		x_axis = self.plot.getAxis('bottom')
-		x_axis.setTickSpacing(major=1.0, minor=0.2)
-		y_axis = self.plot.getAxis('left')
-		#y_axis.setTickSpacing(major=0.5, minor=0.1)
-
-		top = QGridLayout()
-		top.addWidget(QLabel("Patient ID:"), 0, 0)
-		top.addWidget(self.patient_id, 0, 1)
-		top.addWidget(QLabel("Patient Name:"), 1, 0)
-		top.addWidget(self.patient_name, 1, 1)
-		top.addWidget(self.status, 2, 0, 1, 2)
-
-		controls = QHBoxLayout()
-		controls.addWidget(self.btn_start)
-		controls.addWidget(self.btn_stop)
-		controls.addWidget(self.btn_save)
-		controls.addWidget(self.btn_process)
-
-		main = QVBoxLayout()
-		main.addLayout(top)
-		main.addWidget(self.plot)
-		main.addLayout(controls)
-
-		container = QWidget()
-		container.setLayout(main)
-		self.setCentralWidget(container)
-
-		self.btn_start.clicked.connect(self.start_recording)
-		self.btn_stop.clicked.connect(self.stop_recording)
-		self.btn_save.clicked.connect(self.save_data)
-		self.btn_process.clicked.connect(self.process_data)
-
-	def start_recording(self):
-		self.recording = True
-		self.buffer.clear()
-		mode = "Hardware" if self.use_hardware else "Simulation"
-		self.status.setText(f"Status: Recording... ({mode})")
-		self.btn_start.setEnabled(False)
-		self.btn_stop.setEnabled(True)
-		print("Started recording")
-
-	def stop_recording(self):
-		self.recording = False
-		mode = "Hardware" if self.use_hardware else "Simulation"
-		self.status.setText(f"Status: Stopped ({mode}) - {len(self.buffer)} samples")
-		self.btn_start.setEnabled(True)
-		self.btn_stop.setEnabled(False)
-		print(f"Stopped recording - captured {len(self.buffer)} samples")
-
-	def save_data(self):
-		pid = self.patient_id.text().strip()
-		name = self.patient_name.text().strip()
-
-		if not pid or not name:
-			self.status.setText("Status: Enter Patient ID + Name before saving")
-			return
-
-		if len(self.buffer) == 0:
-			self.status.setText("Status: No data to save - record first!")
-			return
-
-		try:
-			timestamp = datetime.now().strftime("%Y%m%d_%")
-			filename = f"ecg_{pid}_{name}_{timestamp}.csv"
-
-			with open(filename, 'w', newline='') as f:
-				writer = csv.writer(f)
-				writer.writerow(["time (s)", "ecg (V)"])
-				for i, sample in enumerate(self.buffer):
-					writer.writerow([i / self.sample_rate, sample/1000])
-
-			self.status.setText(f"Status: Saved {len(self.buffer)} samples to {filename}")
-			print(f"Saved {len(self.buffer)} samples to {filename}")
-
-		except Exception as e:
-			self.status.setText(f"Status: Save failed - {str(e)}")
-			print(f"Save error: {e}")
-
-	def process_data(self):
-		filepath, _ = QFileDialog.getOpenFileName(
-			self, "Select ECG Data File", "", "CSV Files (*.csv);;All Files (*)"
-		)
-		if not filepath:
-			return
-
-		self.status.setText(f"Status: Processing {filepath}...")
-		print(f"Selected file for processing: {filepath}")
-
-		processing_script = ""  # TODO: set path to ML script
-
-		if not processing_script:
-			self.status.setText("Status: Processing script path not configured yet")
-			print("WARNING: processing_script path is empty")
-			return
-
-		try:
-			subprocess.Popen([sys.executable, processing_script, filepath])
-			self.status.setText(f"Status: Processing started for {filepath}")
-		except Exception as e:
-			self.status.setText(f"Status: Processing failed - {str(e)}")
-			print(f"Processing error: {e}")
-
-	def update_plot(self):
-		if self.use_hardware:
-			try:
-				while not self.data_queue.empty():
-					sample = self.data_queue.get_nowait()
-
-					if self.recording:
-						self.buffer.append(sample)
-
-					self.data = np.roll(self.data, -1)
-					self.data[-1] = sample
-			except queue.Empty:
-				pass
-		else:
-			self.sim_time += 1
-			sample = 0.8 * np.sin(self.sim_time / 15.0) + 0.2 * np.random.randn()
-
-			if self.recording:
-				self.buffer.append(sample)
-
-			self.data = np.roll(self.data, -1)
-			self.data[-1] = sample
-
-		self.curve.setData(self.time_axis, self.data)
-
-	def closeEvent(self, event):
-		if self.acquisition_thread:
-			self.acquisition_thread.stop()
-			self.acquisition_thread.join(timeout=2.0)
-
-		if self.ads1293:
-			self.ads1293.close()
-
-		event.accept()
-		print("Application closed")
+    def closeEvent(self, event):
+        """Handle window close event"""
+        # Stop acquisition thread
+        if self.acquisition_thread:
+            self.acquisition_thread.stop()
+            self.acquisition_thread.join(timeout=2.0)
+        
+        # Close hardware
+        if self.ads1293:
+            self.ads1293.close()
+        
+        event.accept()
+        print("Application closed")
 
 
 def main():
