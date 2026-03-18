@@ -138,7 +138,7 @@ class ADS1293:
 
 		self.spi = spidev.SpiDev()
 		self.spi.open(bus, device)
-		self.spi.max_speed_hz = 400000  # 4 MHz
+		self.spi.max_speed_hz = 4096000  # 4 MHz
 		self.spi.mode = 0b01             # SPI Mode 1 (CPOL=0, CPHA=1)
 		self.sample_rate = sample_rate
 
@@ -373,7 +373,7 @@ class ECGAcquisitionThread(threading.Thread):
 		self.daemon = True
 
 		# Bandpass 0.5-40 Hz
-		self.sos_bp = butter(4, [0.5, 20.0], btype='bandpass', fs=sample_rate, output='sos')
+		self.sos_bp = butter(4, [0.5, 40.0], btype='bandpass', fs=sample_rate, output='sos')
 		self.zi_bp = sosfilt_zi(self.sos_bp)
 
 		# 60 Hz notch
@@ -576,9 +576,9 @@ class MainWindow(QMainWindow):
 
 			with open(filename, 'w', newline='') as f:
 				writer = csv.writer(f)
-				writer.writerow(["Sample", "ECG_mV", "Patient_ID", "Patient_Name"])
+				writer.writerow(["time (s)", "ecg (V)"])
 				for i, sample in enumerate(self.buffer):
-					writer.writerow([i, sample, pid, name])
+					writer.writerow([i / self.sample_rate, sample/1000])
 
 			self.status.setText(f"Status: Saved {len(self.buffer)} samples to {filename}")
 			print(f"Saved {len(self.buffer)} samples to {filename}")
