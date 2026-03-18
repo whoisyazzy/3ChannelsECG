@@ -10,12 +10,13 @@ import csv
 from datetime import datetime
 from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QFont, QPainter, QPen, QColor
 from PyQt6.QtWidgets import (
-	QApplication, QMainWindow, QWidget,
+	QApplication, QMainWindow, QWidget, QStackedWidget,
 	QPushButton, QLabel, QLineEdit,
 	QVBoxLayout, QHBoxLayout, QGridLayout,
-	QFileDialog
+	QFileDialog, QFrame, QSpacerItem, QSizePolicy
 )
 
 # Try to import spidev (only available on Raspberry Pi)
@@ -435,12 +436,188 @@ class ECGAcquisitionThread(threading.Thread):
 		print("ECG acquisition thread stopped")
 
 
+APP_STYLESHEET = """
+QMainWindow, QWidget#root {
+	background-color: #0d1117;
+}
+QWidget#homePage {
+	background-color: #0d1117;
+}
+QWidget#ecgPage {
+	background-color: #0d1117;
+}
+QLabel#appTitle {
+	color: #00e5a0;
+	font-size: 42px;
+	font-weight: bold;
+	letter-spacing: 3px;
+}
+QLabel#appSubtitle {
+	color: #8b9ab0;
+	font-size: 14px;
+	letter-spacing: 1px;
+}
+QLabel#sectionLabel {
+	color: #c9d1d9;
+	font-size: 12px;
+	font-weight: bold;
+}
+QLabel#statusLabel {
+	color: #8b9ab0;
+	font-size: 12px;
+	padding: 4px 0px;
+}
+QLabel#modeChip {
+	color: #0d1117;
+	background-color: #00e5a0;
+	border-radius: 8px;
+	padding: 3px 10px;
+	font-size: 11px;
+	font-weight: bold;
+}
+QLineEdit {
+	background-color: #161b22;
+	border: 1px solid #30363d;
+	border-radius: 6px;
+	color: #c9d1d9;
+	padding: 8px 12px;
+	font-size: 13px;
+	selection-background-color: #00e5a0;
+	selection-color: #0d1117;
+}
+QLineEdit:focus {
+	border: 1px solid #00e5a0;
+}
+QLineEdit::placeholder {
+	color: #484f58;
+}
+QPushButton#launchBtn {
+	background-color: #00e5a0;
+	color: #0d1117;
+	border: none;
+	border-radius: 8px;
+	padding: 14px 40px;
+	font-size: 16px;
+	font-weight: bold;
+	letter-spacing: 1px;
+}
+QPushButton#launchBtn:hover {
+	background-color: #00fdb4;
+}
+QPushButton#launchBtn:pressed {
+	background-color: #00b87c;
+}
+QPushButton#backBtn {
+	background-color: transparent;
+	color: #8b9ab0;
+	border: 1px solid #30363d;
+	border-radius: 6px;
+	padding: 6px 16px;
+	font-size: 12px;
+}
+QPushButton#backBtn:hover {
+	border-color: #8b9ab0;
+	color: #c9d1d9;
+}
+QPushButton#actionBtn {
+	background-color: #161b22;
+	color: #c9d1d9;
+	border: 1px solid #30363d;
+	border-radius: 6px;
+	padding: 8px 16px;
+	font-size: 13px;
+}
+QPushButton#actionBtn:hover {
+	background-color: #21262d;
+	border-color: #8b9ab0;
+}
+QPushButton#actionBtn:disabled {
+	color: #484f58;
+	border-color: #21262d;
+}
+QPushButton#startBtn {
+	background-color: #1a4731;
+	color: #00e5a0;
+	border: 1px solid #00e5a0;
+	border-radius: 6px;
+	padding: 8px 16px;
+	font-size: 13px;
+	font-weight: bold;
+}
+QPushButton#startBtn:hover {
+	background-color: #1f5a3d;
+}
+QPushButton#startBtn:disabled {
+	background-color: #161b22;
+	color: #484f58;
+	border-color: #21262d;
+}
+QPushButton#stopBtn {
+	background-color: #3d1a1a;
+	color: #f85149;
+	border: 1px solid #f85149;
+	border-radius: 6px;
+	padding: 8px 16px;
+	font-size: 13px;
+	font-weight: bold;
+}
+QPushButton#stopBtn:hover {
+	background-color: #5a2020;
+}
+QPushButton#stopBtn:disabled {
+	background-color: #161b22;
+	color: #484f58;
+	border-color: #21262d;
+}
+QFrame#divider {
+	color: #21262d;
+}
+"""
+
+ECG_TRACE = [
+	0, 0, 0, 0, 0.05, 0.1, 0.05, 0,
+	0, -0.1, 0.3, 1.0, -0.3, 0, 0.1, 0.15,
+	0.12, 0.1, 0.08, 0.06, 0.04, 0.02, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+]
+
+
+class EcgTraceWidget(QWidget):
+	"""Decorative static ECG trace drawn in the home page header."""
+
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setFixedHeight(80)
+
+	def paintEvent(self, event):
+		painter = QPainter(self)
+		painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+		pen = QPen(QColor("#00e5a0"), 2)
+		painter.setPen(pen)
+
+		w, h = self.width(), self.height()
+		mid_y = h / 2
+		scale_y = h * 0.38
+		repeats = (w // (len(ECG_TRACE) * 4)) + 2
+		points = ECG_TRACE * repeats
+		n = len(points)
+		x_step = w / max(n - 1, 1)
+
+		for i in range(n - 1):
+			x1 = i * x_step
+			y1 = mid_y - points[i] * scale_y
+			x2 = (i + 1) * x_step
+			y2 = mid_y - points[i + 1] * scale_y
+			painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+
 class MainWindow(QMainWindow):
-	"""Main GUI window for ECG dashboard"""
+	"""Main GUI window — home page + ECG dashboard."""
 
 	def __init__(self, use_hardware=True):
 		super().__init__()
-		self.setWindowTitle("ECG Dashboard - ADS1293")
+		self.setWindowTitle("ECG Monitor")
+		self.setObjectName("root")
 
 		self.use_hardware = use_hardware and SPI_AVAILABLE
 		self.ads1293 = None
@@ -453,6 +630,7 @@ class MainWindow(QMainWindow):
 		self.display_samples = self.sample_rate * self.display_seconds
 		self.data = np.zeros(self.display_samples)
 		self.data_queue = queue.Queue(maxsize=4096)
+		self.sim_time = 0
 
 		if self.use_hardware:
 			try:
@@ -472,74 +650,239 @@ class MainWindow(QMainWindow):
 				self.use_hardware = False
 				self.ads1293 = None
 
-		self.setup_ui()
+		self.stack = QStackedWidget()
+		self.setCentralWidget(self.stack)
+
+		self.stack.addWidget(self._build_home_page())   # index 0
+		self.stack.addWidget(self._build_ecg_page())    # index 1
 
 		self.timer = QTimer()
 		self.timer.timeout.connect(self.update_plot)
-		self.timer.start(20)  # 50 FPS
 
-		self.sim_time = 0
+	# -- Page builders ----------------------------------------------------------
 
-	def setup_ui(self):
+	def _build_home_page(self):
+		page = QWidget()
+		page.setObjectName("homePage")
+
+		outer = QVBoxLayout(page)
+		outer.setContentsMargins(0, 0, 0, 0)
+		outer.setSpacing(0)
+
+		# Decorative ECG trace banner
+		trace = EcgTraceWidget()
+		outer.addWidget(trace)
+
+		# -- Content card -------------------------------------------------------
+		card = QWidget()
+		card.setObjectName("homePage")
+		card_layout = QVBoxLayout(card)
+		card_layout.setContentsMargins(60, 40, 60, 50)
+		card_layout.setSpacing(0)
+
+		# Title
+		title = QLabel("ECG MONITOR")
+		title.setObjectName("appTitle")
+		title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+		subtitle = QLabel("ADS1293 - Real-Time Cardiac Monitoring")
+		subtitle.setObjectName("appSubtitle")
+		subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+		mode_text = "Hardware" if self.use_hardware else "Simulation"
+		mode_chip = QLabel(f"  {mode_text} Mode  ")
+		mode_chip.setObjectName("modeChip")
+		mode_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		mode_chip.setFixedHeight(24)
+
+		mode_row = QHBoxLayout()
+		mode_row.addStretch()
+		mode_row.addWidget(mode_chip)
+		mode_row.addStretch()
+
+		card_layout.addWidget(title)
+		card_layout.addSpacing(6)
+		card_layout.addWidget(subtitle)
+		card_layout.addSpacing(10)
+		card_layout.addLayout(mode_row)
+		card_layout.addSpacing(40)
+
+		# Patient info form
+		pid_label = QLabel("PATIENT ID")
+		pid_label.setObjectName("sectionLabel")
+		self.home_patient_id = QLineEdit()
+		self.home_patient_id.setPlaceholderText("e.g. P-00123")
+		self.home_patient_id.setFixedHeight(40)
+
+		name_label = QLabel("PATIENT NAME")
+		name_label.setObjectName("sectionLabel")
+		self.home_patient_name = QLineEdit()
+		self.home_patient_name.setPlaceholderText("First Last")
+		self.home_patient_name.setFixedHeight(40)
+
+		form = QVBoxLayout()
+		form.setSpacing(10)
+		form.addWidget(pid_label)
+		form.addWidget(self.home_patient_id)
+		form.addSpacing(14)
+		form.addWidget(name_label)
+		form.addWidget(self.home_patient_name)
+
+		form_wrapper = QHBoxLayout()
+		form_wrapper.addStretch(1)
+		inner = QVBoxLayout()
+		inner.addLayout(form)
+		inner.setContentsMargins(0, 0, 0, 0)
+		form_frame = QWidget()
+		form_frame.setLayout(inner)
+		form_frame.setFixedWidth(380)
+		form_wrapper.addWidget(form_frame)
+		form_wrapper.addStretch(1)
+
+		card_layout.addLayout(form_wrapper)
+		card_layout.addSpacing(36)
+
+		# Launch button
+		launch_btn = QPushButton("Launch Live ECG")
+		launch_btn.setObjectName("launchBtn")
+		launch_btn.setFixedHeight(52)
+		launch_btn.setFixedWidth(260)
+		launch_btn.clicked.connect(self._launch_ecg)
+
+		btn_row = QHBoxLayout()
+		btn_row.addStretch()
+		btn_row.addWidget(launch_btn)
+		btn_row.addStretch()
+
+		card_layout.addLayout(btn_row)
+		card_layout.addStretch()
+
+		outer.addWidget(card)
+
+		# Footer
+		footer = QLabel("Lead I  |  0.5-40 Hz Bandpass  |  853 SPS")
+		footer.setObjectName("appSubtitle")
+		footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		footer.setContentsMargins(0, 0, 0, 16)
+		outer.addWidget(footer)
+
+		return page
+
+	def _build_ecg_page(self):
+		page = QWidget()
+		page.setObjectName("ecgPage")
+
 		mode_text = "Hardware Mode" if self.use_hardware else "Simulation Mode"
 		self.status = QLabel(f"Status: Idle ({mode_text})")
+		self.status.setObjectName("statusLabel")
 
 		self.patient_id = QLineEdit()
 		self.patient_id.setPlaceholderText("Patient ID")
+		self.patient_id.setFixedHeight(34)
 
 		self.patient_name = QLineEdit()
 		self.patient_name.setPlaceholderText("Patient Name")
+		self.patient_name.setFixedHeight(34)
 
 		self.btn_start = QPushButton("Start Recording")
+		self.btn_start.setObjectName("startBtn")
 		self.btn_stop = QPushButton("Stop Recording")
-		self.btn_save = QPushButton("Save ECG Data")
+		self.btn_stop.setObjectName("stopBtn")
+		self.btn_save = QPushButton("Save ECG")
+		self.btn_save.setObjectName("actionBtn")
 		self.btn_process = QPushButton("Process")
+		self.btn_process.setObjectName("actionBtn")
+		self.btn_back = QPushButton("< Home")
+		self.btn_back.setObjectName("backBtn")
 		self.btn_stop.setEnabled(False)
 
+		# Header bar
+		pid_lbl = QLabel("PATIENT ID")
+		pid_lbl.setObjectName("sectionLabel")
+		name_lbl = QLabel("PATIENT NAME")
+		name_lbl.setObjectName("sectionLabel")
+
+		header = QHBoxLayout()
+		header.setSpacing(16)
+
+		pid_col = QVBoxLayout()
+		pid_col.setSpacing(4)
+		pid_col.addWidget(pid_lbl)
+		pid_col.addWidget(self.patient_id)
+
+		name_col = QVBoxLayout()
+		name_col.setSpacing(4)
+		name_col.addWidget(name_lbl)
+		name_col.addWidget(self.patient_name)
+
+		header.addWidget(self.btn_back)
+		header.addSpacing(8)
+		header.addLayout(pid_col)
+		header.addLayout(name_col)
+		header.addStretch()
+		header.addWidget(self.status)
+
+		# ECG plot
+		pg.setConfigOption('background', '#0d1117')
+		pg.setConfigOption('foreground', '#8b9ab0')
+
 		self.plot = pg.PlotWidget()
-		self.plot.setLabel('left', 'ECG (mV)')
-		self.plot.setLabel('bottom', 'Time (s)')
-		self.plot.setTitle("Lead I ECG - ADS1293 (1000 SPS)")
-		self.plot.showGrid(x=True, y=True, alpha=0.3)
+		self.plot.setLabel('left', 'mV', color='#8b9ab0')
+		self.plot.setLabel('bottom', 'Time (s)', color='#8b9ab0')
+		self.plot.setTitle("Lead I - ADS1293", color='#c9d1d9', size='13pt')
+		self.plot.showGrid(x=True, y=True, alpha=0.15)
+		self.plot.getPlotItem().getAxis('left').setTextPen('#8b9ab0')
+		self.plot.getPlotItem().getAxis('bottom').setTextPen('#8b9ab0')
 
 		self.time_axis = np.linspace(0, self.display_seconds, self.display_samples)
-		self.curve = self.plot.plot(self.time_axis, self.data, pen=pg.mkPen('g', width=1))
+		self.curve = self.plot.plot(
+			self.time_axis, self.data,
+			pen=pg.mkPen(color='#00e5a0', width=1.5)
+		)
 
 		self.plot.setYRange(-0.7, 2.0)
 		self.plot.setXRange(0, self.display_seconds)
-		#self.plot.enableAutoRange(axis="y")
+		self.plot.getAxis('bottom').setTickSpacing(major=1.0, minor=0.2)
 
-		x_axis = self.plot.getAxis('bottom')
-		x_axis.setTickSpacing(major=1.0, minor=0.2)
-		y_axis = self.plot.getAxis('left')
-		#y_axis.setTickSpacing(major=0.5, minor=0.1)
-
-		top = QGridLayout()
-		top.addWidget(QLabel("Patient ID:"), 0, 0)
-		top.addWidget(self.patient_id, 0, 1)
-		top.addWidget(QLabel("Patient Name:"), 1, 0)
-		top.addWidget(self.patient_name, 1, 1)
-		top.addWidget(self.status, 2, 0, 1, 2)
-
+		# Control bar
 		controls = QHBoxLayout()
+		controls.setSpacing(10)
 		controls.addWidget(self.btn_start)
 		controls.addWidget(self.btn_stop)
+		controls.addStretch()
 		controls.addWidget(self.btn_save)
 		controls.addWidget(self.btn_process)
 
-		main = QVBoxLayout()
-		main.addLayout(top)
+		main = QVBoxLayout(page)
+		main.setContentsMargins(20, 16, 20, 16)
+		main.setSpacing(12)
+		main.addLayout(header)
 		main.addWidget(self.plot)
 		main.addLayout(controls)
-
-		container = QWidget()
-		container.setLayout(main)
-		self.setCentralWidget(container)
 
 		self.btn_start.clicked.connect(self.start_recording)
 		self.btn_stop.clicked.connect(self.stop_recording)
 		self.btn_save.clicked.connect(self.save_data)
 		self.btn_process.clicked.connect(self.process_data)
+		self.btn_back.clicked.connect(self._go_home)
+
+		return page
+
+	# -- Navigation -------------------------------------------------------------
+
+	def _launch_ecg(self):
+		pid = self.home_patient_id.text().strip()
+		name = self.home_patient_name.text().strip()
+		self.patient_id.setText(pid)
+		self.patient_name.setText(name)
+		self.stack.setCurrentIndex(1)
+		self.timer.start(20)
+
+	def _go_home(self):
+		if self.recording:
+			self.stop_recording()
+		self.timer.stop()
+		self.stack.setCurrentIndex(0)
 
 	def start_recording(self):
 		self.recording = True
@@ -650,16 +993,17 @@ class MainWindow(QMainWindow):
 
 def main():
 	print("=" * 60)
-	print("ECG Dashboard - ADS1293 on Raspberry Pi 5")
+	print("ECG Monitor - ADS1293 on Raspberry Pi 5")
 	print("=" * 60)
 	print(f"SPI Available: {SPI_AVAILABLE}")
 	print(f"GPIO Available: {GPIO_AVAILABLE} (lgpio)")
 	print()
 
 	app = QApplication(sys.argv)
+	app.setStyleSheet(APP_STYLESHEET)
 
 	window = MainWindow(use_hardware=True)
-	window.resize(1000, 700)
+	window.resize(1000, 720)
 	window.show()
 
 	sys.exit(app.exec())
