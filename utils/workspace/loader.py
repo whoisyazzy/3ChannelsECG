@@ -56,12 +56,12 @@ def check_max_ids(directory=SCI_WFDB_DATA):
 
 
 
-def load_ecg_record():
+def load_ecg_record(max_duration=None):
     global _records, _idx
     if DATASET_MODE == "SCI":
         if _sci_iterator is None:
             init_sci_file_iterator()
-        return load_sci_record()
+        return load_sci_record(max_duration=max_duration)
     if _records is None:
         init_file_iterator()
 
@@ -78,7 +78,7 @@ def load_ecg_record():
 
 
 
-def load_sci_record(directory=SCI_WFDB_DATA):
+def load_sci_record(directory=SCI_WFDB_DATA, max_duration=None):
     global _sci_iterator
 
     if _sci_iterator is None:
@@ -103,7 +103,7 @@ def load_sci_record(directory=SCI_WFDB_DATA):
     lead_signals = [signal[:, i] for i in range(signal.shape[1])]
 
     # Trim
-    max_samples = int(MAX_DATA_DURATION * fs)
+    max_samples = int(max_duration * fs)
     if signal.shape[0] > max_samples:
         signal = signal[:max_samples, :]
 

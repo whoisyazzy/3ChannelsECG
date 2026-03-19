@@ -377,7 +377,8 @@ def build_single_sci_metrics(
     csv_file,
     input_dir,
     output_csv="single_sci_ecg_metrics.csv",
-    convert_dir="converted_sci"
+    convert_dir="converted_sci",
+    max_duration=None
 ):
     import os
     import csv
@@ -413,13 +414,13 @@ def build_single_sci_metrics(
             loader._sci_iterator = iter([record_id])
 
             # 2️⃣ Load ECG
-            ecg = init_processing()
+            ecg = init_processing(max_duration)
             if ecg is None:
                 raise RuntimeError("init_processing returned None")
 
             # 3️⃣ Sliding window processing
             fs = ecg.get_sampling_rate()
-            window_size = int(fs * WINDOW_SIZE)
+            window_size = int(fs * max_duration)
             step_size = window_size // 6
             end_index = min(len(ecg.get_ecg_signal()), ecg.get_sample_size())
 
@@ -483,11 +484,18 @@ if __name__ == "__main__":
     required=True,
     help="Neurological Level of Injury (e.g., C5, T4)"
 )
+    parser.add_argument(
+        "--max_duration",
+        type=float,
+        default=None,
+        help="Maximum ECG duration in seconds; default uses config value"
+    )
     args = parser.parse_args()
     build_single_sci_metrics(
         csv_file=args.csv,
         input_dir="",
-        output_csv="sci_ecg_metrics.csv"
+        output_csv="sci_ecg_metrics.csv",
+        max_duration=args.max_duration
     )
     metrics_path = os.path.join("cache", metrics_output)
 
