@@ -755,7 +755,7 @@ class SettingsDialog(QDialog):
 
 		layout = QVBoxLayout(self)
 
-		label = QLabel("Max duration (seconds):")
+		label = QLabel("Processing duration (seconds):")
 		label.setStyleSheet("font-size: 14px;")
 		layout.addWidget(label)
 
@@ -840,11 +840,11 @@ class MainWindow(QMainWindow):
 		dialog = SettingsDialog(self.max_duration, self)
 		if dialog.exec():
 			self.max_duration = dialog.value()
-			self.status.setText(f"Max duration set to {self.max_duration} s")
+			self.status.setText(f"Processing duration set to {self.max_duration} s")
 			QMessageBox.information(
 				self,
 				"Settings Updated",
-				f"Max duration is now set to {self.max_duration} seconds."
+				f"Processing duration is now set to {self.max_duration} seconds."
 			)
 	def _build_home_page(self):
 		page = QWidget()
@@ -1135,7 +1135,7 @@ class MainWindow(QMainWindow):
 				"--gender", gender,
 				"--max_duration", str(self.max_duration),
 			])
-			self.status.setText(f"Processing started (max duration: {self.max_duration}s)")
+			self.status.setText(f"Processing started (Processing duration: {self.max_duration}s)")
 			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender} max_duration={self.max_duration}")
 		except Exception as e:
 			self.status.setText(f"Processing failed - {str(e)}")
