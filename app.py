@@ -811,7 +811,20 @@ class MainWindow(QMainWindow):
 		exit_row.addWidget(exit_btn)
 		exit_row.addStretch()
 
+		process_btn = QPushButton("Process ECG File")
+		process_btn.setObjectName("actionBtn")
+		process_btn.setFixedHeight(40)
+		process_btn.setFixedWidth(200)
+		process_btn.clicked.connect(self.process_data)
+
+		process_row = QHBoxLayout()
+		process_row.addStretch()
+		process_row.addWidget(process_btn)
+		process_row.addStretch()
+
 		card_layout.addLayout(btn_row)
+		card_layout.addSpacing(8)
+		card_layout.addLayout(process_row)
 		card_layout.addSpacing(12)
 		card_layout.addLayout(exit_row)
 		card_layout.addStretch()
@@ -835,22 +848,12 @@ class MainWindow(QMainWindow):
 		self.status = QLabel(f"Idle ({mode_text})")
 		self.status.setObjectName("statusLabel")
 
-		self.patient_id = QLineEdit()
-		self.patient_id.setPlaceholderText("Patient ID")
-		self.patient_id.setFixedHeight(28)
-
-		self.patient_name = QLineEdit()
-		self.patient_name.setPlaceholderText("Patient Name")
-		self.patient_name.setFixedHeight(28)
-
 		self.btn_start = QPushButton("Start")
 		self.btn_start.setObjectName("startBtn")
 		self.btn_stop = QPushButton("Stop")
 		self.btn_stop.setObjectName("stopBtn")
 		self.btn_save = QPushButton("Save")
 		self.btn_save.setObjectName("actionBtn")
-		self.btn_process = QPushButton("Process")
-		self.btn_process.setObjectName("actionBtn")
 		self.btn_back = QPushButton("< Home")
 		self.btn_back.setObjectName("backBtn")
 		self.btn_stop.setEnabled(False)
@@ -861,32 +864,6 @@ class MainWindow(QMainWindow):
 		self.btn_channel.setFixedHeight(28)
 		self.btn_channel.setFixedWidth(44)
 		self.btn_channel.setToolTip("Toggle displayed channel")
-
-		# Header bar
-		pid_lbl = QLabel("ID")
-		pid_lbl.setObjectName("sectionLabel")
-		name_lbl = QLabel("Name")
-		name_lbl.setObjectName("sectionLabel")
-
-		header = QHBoxLayout()
-		header.setSpacing(8)
-
-		pid_col = QVBoxLayout()
-		pid_col.setSpacing(2)
-		pid_col.addWidget(pid_lbl)
-		pid_col.addWidget(self.patient_id)
-
-		name_col = QVBoxLayout()
-		name_col.setSpacing(2)
-		name_col.addWidget(name_lbl)
-		name_col.addWidget(self.patient_name)
-
-		header.addWidget(self.btn_back)
-		header.addLayout(pid_col)
-		header.addLayout(name_col)
-		header.addStretch()
-		header.addWidget(self.status)
-		header.addWidget(self.btn_channel)
 
 		# ECG plots — one per lead
 		pg.setConfigOption('background', '#000000')
@@ -923,19 +900,21 @@ class MainWindow(QMainWindow):
 			self.plots.append(plot)
 			self.curves.append(curve)
 
-		# Control bar
+		# Bottom control bar
 		controls = QHBoxLayout()
 		controls.setSpacing(8)
 		controls.addWidget(self.btn_start)
 		controls.addWidget(self.btn_stop)
 		controls.addStretch()
+		controls.addWidget(self.status)
+		controls.addStretch()
 		controls.addWidget(self.btn_save)
-		controls.addWidget(self.btn_process)
+		controls.addWidget(self.btn_channel)
+		controls.addWidget(self.btn_back)
 
 		main = QVBoxLayout(page)
 		main.setContentsMargins(10, 8, 10, 8)
 		main.setSpacing(6)
-		main.addLayout(header)
 		for plot in self.plots:
 			main.addWidget(plot)
 		main.addLayout(controls)
@@ -943,7 +922,6 @@ class MainWindow(QMainWindow):
 		self.btn_start.clicked.connect(self.start_recording)
 		self.btn_stop.clicked.connect(self.stop_recording)
 		self.btn_save.clicked.connect(self.save_data)
-		self.btn_process.clicked.connect(self.process_data)
 		self.btn_back.clicked.connect(self._go_home)
 		self.btn_channel.clicked.connect(self._toggle_channel)
 
@@ -999,36 +977,33 @@ class MainWindow(QMainWindow):
 		print(f"Stopped recording - captured {total} samples/ch")
 
 	def save_data(self):
-		pid = self.patient_id.text().strip()
-		name = self.patient_name.text().strip()
-
-		if not pid or not name:
-			self.status.setText("Enter Patient ID + Name before saving")
-			return
-
 		if len(self.buffers[0]) == 0:
 			self.status.setText("No data to save - record first!")
 			return
 
-		try:
-			timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-			filename = f"ecg_{pid}_{name}_{timestamp}.csv"
+		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+		default_name = f"ecg_{timestamp}.csv"
 
-			with open(filename, 'w', newline='') as f:
+		filepath, _ = QFileDialog.getSaveFileName(
+			self, "Save ECG Data", default_name, "CSV Files (*.csv);;All Files (*)"
+		)
+		if not filepath:
+			return
+
+		try:
+			with open(filepath, 'w', newline='') as f:
 				writer = csv.writer(f)
-				writer.writerow([
-					"Sample", "LeadI_mV", "LeadII_mV", "LeadV_mV",
-					"Patient_ID", "Patient_Name"
-				])
+				writer.writerow(["Sample", "LeadI_mV", "LeadII_mV", "LeadV_mV"])
 				for i in range(len(self.buffers[0])):
 					ch1 = self.buffers[0][i] if i < len(self.buffers[0]) else 0.0
 					ch2 = self.buffers[1][i] if i < len(self.buffers[1]) else 0.0
 					ch3 = self.buffers[2][i] if i < len(self.buffers[2]) else 0.0
-					writer.writerow([i, ch1, ch2, ch3, pid, name])
+					writer.writerow([i, ch1, ch2, ch3])
 
 			total = len(self.buffers[0])
+			filename = filepath.split('/')[-1]
 			self.status.setText(f"Saved {total} samples to {filename}")
-			print(f"Saved {total} samples × 3 channels to {filename}")
+			print(f"Saved {total} samples × 3 channels to {filepath}")
 
 		except Exception as e:
 			self.status.setText(f"Save failed - {str(e)}")
