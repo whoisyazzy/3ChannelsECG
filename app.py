@@ -365,6 +365,9 @@ class ECGAcquisitionThread(threading.Thread):
 		self.sample_rate = sample_rate
 		self.running = False
 		self.daemon = True
+		self.ch3_settle_counter =0
+		self.ch3_settling = False
+		CH3_SETTLE_SAMPLES = 2000
 
 		# Create filter chains for each channel
 		self.filters = []
@@ -448,15 +451,23 @@ class ECGAcquisitionThread(threading.Thread):
 						filtered = 0.0
 					elif i == 1 and (IN1 or IN3):
 						filtered = 0.0
-					elif i == 2 and (IN5 or IN6):
-						filtered = 0.0
+					elif i == 2:
+						if IN5 or IN6:
+							filtered = 0.0
+							self.ch3_settling = True
+							self.ch3_settle_counter = 0
+						elif self.ch3_settling:
+							# LOD cleared — run filter but discard output
+							self._apply_filter(i, samples[i])
+							filtered = 0.0
+							self.ch3_settle_counter += 1
+							if self.ch3_settle_counter >= self.CH3_SETTLE_SAMPLES:
+								self.ch3_settling = False
+								print("CH3 settled")
+						else:
+							filtered = self._apply_filter(i, samples[i])
 					else:
 						filtered = self._apply_filter(i, samples[i])
-
-						# Clamp and reset on artifact
-						if abs(filtered) > 2.0:
-							filtered = 0.0
-							self._reset_filter(i, 0.0) 
 
 					if not self.data_queues[i].full():
 						self.data_queues[i].put(filtered)
