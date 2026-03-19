@@ -136,7 +136,7 @@ def predict_ais_from_cache(
         return 0
 
     if is_above_t6_local(nli) != 1:
-        print("⚠ Patient below T6 → AIS model not applied.")
+        print("⚠ Patient Not supported → AIS model not applied.")
         return None
 
     # -----------------------------
