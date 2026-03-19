@@ -367,7 +367,7 @@ class ECGAcquisitionThread(threading.Thread):
 		self.daemon = True
 		self.ch3_settle_counter =0
 		self.ch3_settling = False
-		CH3_SETTLE_SAMPLES = 2000
+		
 
 		# Create filter chains for each channel
 		self.filters = []
@@ -398,6 +398,7 @@ class ECGAcquisitionThread(threading.Thread):
 
 	def run(self):
 		self.running = True
+		CH3_SETTLE_SAMPLES = 2000
 
 		# Wait for first valid samples to initialize filter states
 		print("Waiting for first valid sample to initialize filters...")
@@ -461,7 +462,7 @@ class ECGAcquisitionThread(threading.Thread):
 							self._apply_filter(i, samples[i])
 							filtered = 0.0
 							self.ch3_settle_counter += 1
-							if self.ch3_settle_counter >= self.CH3_SETTLE_SAMPLES:
+							if self.ch3_settle_counter >= CH3_SETTLE_SAMPLES:
 								self.ch3_settling = False
 								print("CH3 settled")
 						else:
