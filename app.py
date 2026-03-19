@@ -628,6 +628,22 @@ QPushButton#channelBtn {
 QPushButton#channelBtn:hover {
 	background-color: #1f3040;
 }
+QPushButton#exitBtn {
+	background-color: #3d1a1a;
+	color: #f85149;
+	border: 1px solid #f85149;
+	border-radius: 7px;
+	padding: 8px 24px;
+	font-size: 14px;
+	font-weight: bold;
+	letter-spacing: 1px;
+}
+QPushButton#exitBtn:hover {
+	background-color: #5a2020;
+}
+QPushButton#exitBtn:pressed {
+	background-color: #7a2828;
+}
 QFrame#divider {
 	color: #21262d;
 }
@@ -779,12 +795,25 @@ class MainWindow(QMainWindow):
 		launch_btn.setFixedWidth(200)
 		launch_btn.clicked.connect(self._launch_ecg)
 
+		exit_btn = QPushButton("Exit")
+		exit_btn.setObjectName("exitBtn")
+		exit_btn.setFixedHeight(40)
+		exit_btn.setFixedWidth(200)
+		exit_btn.clicked.connect(QApplication.instance().quit)
+
 		btn_row = QHBoxLayout()
 		btn_row.addStretch()
 		btn_row.addWidget(launch_btn)
 		btn_row.addStretch()
 
+		exit_row = QHBoxLayout()
+		exit_row.addStretch()
+		exit_row.addWidget(exit_btn)
+		exit_row.addStretch()
+
 		card_layout.addLayout(btn_row)
+		card_layout.addSpacing(12)
+		card_layout.addLayout(exit_row)
 		card_layout.addStretch()
 
 		outer.addWidget(card)
@@ -1076,8 +1105,7 @@ def main():
 	app.setStyleSheet(APP_STYLESHEET)
 
 	window = MainWindow(use_hardware=True)
-	window.resize(800, 400)
-	window.show()
+	window.showFullScreen()
 
 	sys.exit(app.exec())
 
