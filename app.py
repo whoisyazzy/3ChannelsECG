@@ -913,10 +913,11 @@ class MainWindow(QMainWindow):
 		controls.addWidget(self.btn_back)
 
 		main = QVBoxLayout(page)
+		self.ecg_main_layout = main
 		main.setContentsMargins(10, 8, 10, 8)
 		main.setSpacing(6)
 		for plot in self.plots:
-			main.addWidget(plot)
+			main.addWidget(plot, stretch=1)
 		main.addLayout(controls)
 
 		self.btn_start.clicked.connect(self.start_recording)
@@ -937,15 +938,11 @@ class MainWindow(QMainWindow):
 			self.btn_channel.setText("All")
 			for plot in self.plots:
 				plot.setVisible(True)
-			QTimer.singleShot(0, self._force_plot_resize)
+				self.ecg_main_layout.setStretchFactor(plot, 1)
 		else:
 			self.btn_channel.setText(channel_labels[self.active_channel])
 			for i, plot in enumerate(self.plots):
 				plot.setVisible(i == self.active_channel)
-
-	def _force_plot_resize(self):
-		for plot in self.plots:
-			plot.resize(plot.size())
 
 	def _launch_ecg(self):
 		self.stack.setCurrentIndex(1)
