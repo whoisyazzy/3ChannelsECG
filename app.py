@@ -760,7 +760,7 @@ class SettingsDialog(QDialog):
 		layout.addWidget(label)
 
 		self.max_duration_input = QLineEdit(str(current_max_duration))
-		self.max_duration_input.setPlaceholderText("Enter max duration in seconds")
+		self.max_duration_input.setPlaceholderText("Enter Signal Processing Duration In Seconds")
 		self.max_duration_input.setValidator(QIntValidator(1, 3600, self))
 		self.max_duration_input.setFixedHeight(32)
 		layout.addWidget(self.max_duration_input)
