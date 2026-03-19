@@ -494,40 +494,40 @@ QWidget#ecgPage {
 }
 QLabel#appTitle {
 	color: #00e5a0;
-	font-size: 42px;
+	font-size: 26px;
 	font-weight: bold;
 	letter-spacing: 3px;
 }
 QLabel#appSubtitle {
 	color: #8b9ab0;
-	font-size: 14px;
+	font-size: 11px;
 	letter-spacing: 1px;
 }
 QLabel#sectionLabel {
 	color: #c9d1d9;
-	font-size: 12px;
+	font-size: 10px;
 	font-weight: bold;
 }
 QLabel#statusLabel {
 	color: #8b9ab0;
-	font-size: 12px;
-	padding: 4px 0px;
+	font-size: 10px;
+	padding: 2px 0px;
 }
 QLabel#modeChip {
 	color: #0d1117;
 	background-color: #00e5a0;
-	border-radius: 8px;
-	padding: 3px 10px;
-	font-size: 11px;
+	border-radius: 6px;
+	padding: 2px 8px;
+	font-size: 10px;
 	font-weight: bold;
 }
 QLineEdit {
 	background-color: #161b22;
 	border: 1px solid #30363d;
-	border-radius: 6px;
+	border-radius: 5px;
 	color: #c9d1d9;
-	padding: 8px 12px;
-	font-size: 13px;
+	padding: 4px 8px;
+	font-size: 11px;
 	selection-background-color: #00e5a0;
 	selection-color: #0d1117;
 }
@@ -541,9 +541,9 @@ QPushButton#launchBtn {
 	background-color: #00e5a0;
 	color: #0d1117;
 	border: none;
-	border-radius: 8px;
-	padding: 14px 40px;
-	font-size: 16px;
+	border-radius: 7px;
+	padding: 8px 24px;
+	font-size: 14px;
 	font-weight: bold;
 	letter-spacing: 1px;
 }
@@ -557,9 +557,9 @@ QPushButton#backBtn {
 	background-color: transparent;
 	color: #8b9ab0;
 	border: 1px solid #30363d;
-	border-radius: 6px;
-	padding: 6px 16px;
-	font-size: 12px;
+	border-radius: 5px;
+	padding: 4px 10px;
+	font-size: 11px;
 }
 QPushButton#backBtn:hover {
 	border-color: #8b9ab0;
@@ -569,9 +569,9 @@ QPushButton#actionBtn {
 	background-color: #161b22;
 	color: #c9d1d9;
 	border: 1px solid #30363d;
-	border-radius: 6px;
-	padding: 8px 16px;
-	font-size: 13px;
+	border-radius: 5px;
+	padding: 5px 10px;
+	font-size: 11px;
 }
 QPushButton#actionBtn:hover {
 	background-color: #21262d;
@@ -585,9 +585,9 @@ QPushButton#startBtn {
 	background-color: #1a4731;
 	color: #00e5a0;
 	border: 1px solid #00e5a0;
-	border-radius: 6px;
-	padding: 8px 16px;
-	font-size: 13px;
+	border-radius: 5px;
+	padding: 5px 10px;
+	font-size: 11px;
 	font-weight: bold;
 }
 QPushButton#startBtn:hover {
@@ -602,9 +602,9 @@ QPushButton#stopBtn {
 	background-color: #3d1a1a;
 	color: #f85149;
 	border: 1px solid #f85149;
-	border-radius: 6px;
-	padding: 8px 16px;
-	font-size: 13px;
+	border-radius: 5px;
+	padding: 5px 10px;
+	font-size: 11px;
 	font-weight: bold;
 }
 QPushButton#stopBtn:hover {
@@ -614,6 +614,19 @@ QPushButton#stopBtn:disabled {
 	background-color: #161b22;
 	color: #484f58;
 	border-color: #21262d;
+}
+QPushButton#channelBtn {
+	background-color: #1a2332;
+	color: #00e5a0;
+	border: 1px solid #00e5a0;
+	border-radius: 5px;
+	padding: 4px 8px;
+	font-size: 11px;
+	font-weight: bold;
+	min-width: 44px;
+}
+QPushButton#channelBtn:hover {
+	background-color: #1f3040;
 }
 QFrame#divider {
 	color: #21262d;
@@ -633,7 +646,7 @@ class EcgTraceWidget(QWidget):
 
 	def __init__(self, parent=None):
 		super().__init__(parent)
-		self.setFixedHeight(80)
+		self.setFixedHeight(40)
 
 	def paintEvent(self, event):
 		painter = QPainter(self)
@@ -682,6 +695,7 @@ class MainWindow(QMainWindow):
 		# Data arrays and queues for 3 channels
 		self.data = [np.zeros(self.display_samples) for _ in range(3)]
 		self.data_queues = [queue.Queue(maxsize=4096) for _ in range(3)]
+		self.active_channel = -1  # -1 = all, 0/1/2 = single channel
 
 		if self.use_hardware:
 			try:
@@ -728,7 +742,7 @@ class MainWindow(QMainWindow):
 		card = QWidget()
 		card.setObjectName("homePage")
 		card_layout = QVBoxLayout(card)
-		card_layout.setContentsMargins(60, 40, 60, 50)
+		card_layout.setContentsMargins(40, 16, 40, 16)
 		card_layout.setSpacing(0)
 
 		# Title
@@ -744,7 +758,7 @@ class MainWindow(QMainWindow):
 		mode_chip = QLabel(f"  {mode_text} Mode  ")
 		mode_chip.setObjectName("modeChip")
 		mode_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-		mode_chip.setFixedHeight(24)
+		mode_chip.setFixedHeight(20)
 
 		mode_row = QHBoxLayout()
 		mode_row.addStretch()
@@ -752,52 +766,17 @@ class MainWindow(QMainWindow):
 		mode_row.addStretch()
 
 		card_layout.addWidget(title)
-		card_layout.addSpacing(6)
+		card_layout.addSpacing(4)
 		card_layout.addWidget(subtitle)
-		card_layout.addSpacing(10)
+		card_layout.addSpacing(8)
 		card_layout.addLayout(mode_row)
-		card_layout.addSpacing(40)
-
-		# Patient info form
-		pid_label = QLabel("PATIENT ID")
-		pid_label.setObjectName("sectionLabel")
-		self.home_patient_id = QLineEdit()
-		self.home_patient_id.setPlaceholderText("e.g. P-00123")
-		self.home_patient_id.setFixedHeight(40)
-
-		name_label = QLabel("PATIENT NAME")
-		name_label.setObjectName("sectionLabel")
-		self.home_patient_name = QLineEdit()
-		self.home_patient_name.setPlaceholderText("First Last")
-		self.home_patient_name.setFixedHeight(40)
-
-		form = QVBoxLayout()
-		form.setSpacing(10)
-		form.addWidget(pid_label)
-		form.addWidget(self.home_patient_id)
-		form.addSpacing(14)
-		form.addWidget(name_label)
-		form.addWidget(self.home_patient_name)
-
-		form_wrapper = QHBoxLayout()
-		form_wrapper.addStretch(1)
-		inner = QVBoxLayout()
-		inner.addLayout(form)
-		inner.setContentsMargins(0, 0, 0, 0)
-		form_frame = QWidget()
-		form_frame.setLayout(inner)
-		form_frame.setFixedWidth(380)
-		form_wrapper.addWidget(form_frame)
-		form_wrapper.addStretch(1)
-
-		card_layout.addLayout(form_wrapper)
-		card_layout.addSpacing(36)
+		card_layout.addSpacing(20)
 
 		# Launch button
 		launch_btn = QPushButton("Launch Live ECG")
 		launch_btn.setObjectName("launchBtn")
-		launch_btn.setFixedHeight(52)
-		launch_btn.setFixedWidth(260)
+		launch_btn.setFixedHeight(40)
+		launch_btn.setFixedWidth(200)
 		launch_btn.clicked.connect(self._launch_ecg)
 
 		btn_row = QHBoxLayout()
@@ -814,7 +793,7 @@ class MainWindow(QMainWindow):
 		footer = QLabel("Lead I  |  Lead II  |  Lead V  |  0.5-40 Hz Bandpass  |  853 SPS")
 		footer.setObjectName("appSubtitle")
 		footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-		footer.setContentsMargins(0, 0, 0, 16)
+		footer.setContentsMargins(0, 0, 0, 8)
 		outer.addWidget(footer)
 
 		return page
@@ -824,22 +803,22 @@ class MainWindow(QMainWindow):
 		page.setObjectName("ecgPage")
 
 		mode_text = "Hardware Mode" if self.use_hardware else "Simulation Mode"
-		self.status = QLabel(f"Status: Idle ({mode_text})")
+		self.status = QLabel(f"Idle ({mode_text})")
 		self.status.setObjectName("statusLabel")
 
 		self.patient_id = QLineEdit()
 		self.patient_id.setPlaceholderText("Patient ID")
-		self.patient_id.setFixedHeight(34)
+		self.patient_id.setFixedHeight(28)
 
 		self.patient_name = QLineEdit()
 		self.patient_name.setPlaceholderText("Patient Name")
-		self.patient_name.setFixedHeight(34)
+		self.patient_name.setFixedHeight(28)
 
-		self.btn_start = QPushButton("Start Recording")
+		self.btn_start = QPushButton("Start")
 		self.btn_start.setObjectName("startBtn")
-		self.btn_stop = QPushButton("Stop Recording")
+		self.btn_stop = QPushButton("Stop")
 		self.btn_stop.setObjectName("stopBtn")
-		self.btn_save = QPushButton("Save ECG Data")
+		self.btn_save = QPushButton("Save")
 		self.btn_save.setObjectName("actionBtn")
 		self.btn_process = QPushButton("Process")
 		self.btn_process.setObjectName("actionBtn")
@@ -847,31 +826,38 @@ class MainWindow(QMainWindow):
 		self.btn_back.setObjectName("backBtn")
 		self.btn_stop.setEnabled(False)
 
+		# Channel toggle button
+		self.btn_channel = QPushButton("All")
+		self.btn_channel.setObjectName("channelBtn")
+		self.btn_channel.setFixedHeight(28)
+		self.btn_channel.setFixedWidth(44)
+		self.btn_channel.setToolTip("Toggle displayed channel")
+
 		# Header bar
-		pid_lbl = QLabel("PATIENT ID")
+		pid_lbl = QLabel("ID")
 		pid_lbl.setObjectName("sectionLabel")
-		name_lbl = QLabel("PATIENT NAME")
+		name_lbl = QLabel("Name")
 		name_lbl.setObjectName("sectionLabel")
 
 		header = QHBoxLayout()
-		header.setSpacing(16)
+		header.setSpacing(8)
 
 		pid_col = QVBoxLayout()
-		pid_col.setSpacing(4)
+		pid_col.setSpacing(2)
 		pid_col.addWidget(pid_lbl)
 		pid_col.addWidget(self.patient_id)
 
 		name_col = QVBoxLayout()
-		name_col.setSpacing(4)
+		name_col.setSpacing(2)
 		name_col.addWidget(name_lbl)
 		name_col.addWidget(self.patient_name)
 
 		header.addWidget(self.btn_back)
-		header.addSpacing(8)
 		header.addLayout(pid_col)
 		header.addLayout(name_col)
 		header.addStretch()
 		header.addWidget(self.status)
+		header.addWidget(self.btn_channel)
 
 		# ECG plots — one per lead
 		pg.setConfigOption('background', '#000000')
@@ -884,7 +870,7 @@ class MainWindow(QMainWindow):
 		for i in range(3):
 			plot = pg.PlotWidget()
 			plot.setLabel('left', 'mV', color='#8b9ab0')
-			plot.setTitle(self.LEAD_NAMES[i], color='#c9d1d9', size='13pt')
+			plot.setTitle(self.LEAD_NAMES[i], color='#c9d1d9', size='10pt')
 			plot.showGrid(x=True, y=True, alpha=0.15)
 			plot.setYRange(-1.0, 1.5)
 			plot.setXRange(0, self.display_seconds)
@@ -910,7 +896,7 @@ class MainWindow(QMainWindow):
 
 		# Control bar
 		controls = QHBoxLayout()
-		controls.setSpacing(10)
+		controls.setSpacing(8)
 		controls.addWidget(self.btn_start)
 		controls.addWidget(self.btn_stop)
 		controls.addStretch()
@@ -918,8 +904,8 @@ class MainWindow(QMainWindow):
 		controls.addWidget(self.btn_process)
 
 		main = QVBoxLayout(page)
-		main.setContentsMargins(20, 16, 20, 16)
-		main.setSpacing(12)
+		main.setContentsMargins(10, 8, 10, 8)
+		main.setSpacing(6)
 		main.addLayout(header)
 		for plot in self.plots:
 			main.addWidget(plot)
@@ -930,16 +916,26 @@ class MainWindow(QMainWindow):
 		self.btn_save.clicked.connect(self.save_data)
 		self.btn_process.clicked.connect(self.process_data)
 		self.btn_back.clicked.connect(self._go_home)
+		self.btn_channel.clicked.connect(self._toggle_channel)
 
 		return page
 
 	# -- Navigation -------------------------------------------------------------
 
+	def _toggle_channel(self):
+		"""Cycle through: All → Lead I → Lead II → Lead V → All"""
+		channel_labels = ["I", "II", "V"]
+		self.active_channel = self.active_channel + 1 if self.active_channel < 2 else -1
+		if self.active_channel == -1:
+			self.btn_channel.setText("All")
+			for plot in self.plots:
+				plot.setVisible(True)
+		else:
+			self.btn_channel.setText(channel_labels[self.active_channel])
+			for i, plot in enumerate(self.plots):
+				plot.setVisible(i == self.active_channel)
+
 	def _launch_ecg(self):
-		pid = self.home_patient_id.text().strip()
-		name = self.home_patient_name.text().strip()
-		self.patient_id.setText(pid)
-		self.patient_name.setText(name)
 		self.stack.setCurrentIndex(1)
 		self.timer.start(20)  # 50 FPS
 
@@ -954,7 +950,7 @@ class MainWindow(QMainWindow):
 		for buf in self.buffers:
 			buf.clear()
 		mode = "Hardware" if self.use_hardware else "Simulation"
-		self.status.setText(f"Status: Recording... ({mode})")
+		self.status.setText(f"Recording... ({mode})")
 		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(True)
 		print("Started recording")
@@ -963,7 +959,7 @@ class MainWindow(QMainWindow):
 		self.recording = False
 		total = len(self.buffers[0])
 		mode = "Hardware" if self.use_hardware else "Simulation"
-		self.status.setText(f"Status: Stopped ({mode}) - {total} samples/ch")
+		self.status.setText(f"Stopped ({mode}) - {total} samples/ch")
 		self.btn_start.setEnabled(True)
 		self.btn_stop.setEnabled(False)
 		print(f"Stopped recording - captured {total} samples/ch")
@@ -973,11 +969,11 @@ class MainWindow(QMainWindow):
 		name = self.patient_name.text().strip()
 
 		if not pid or not name:
-			self.status.setText("Status: Enter Patient ID + Name before saving")
+			self.status.setText("Enter Patient ID + Name before saving")
 			return
 
 		if len(self.buffers[0]) == 0:
-			self.status.setText("Status: No data to save - record first!")
+			self.status.setText("No data to save - record first!")
 			return
 
 		try:
@@ -997,11 +993,11 @@ class MainWindow(QMainWindow):
 					writer.writerow([i, ch1, ch2, ch3, pid, name])
 
 			total = len(self.buffers[0])
-			self.status.setText(f"Status: Saved {total} samples to {filename}")
+			self.status.setText(f"Saved {total} samples to {filename}")
 			print(f"Saved {total} samples × 3 channels to {filename}")
 
 		except Exception as e:
-			self.status.setText(f"Status: Save failed - {str(e)}")
+			self.status.setText(f"Save failed - {str(e)}")
 
 	def process_data(self):
 		filepath, _ = QFileDialog.getOpenFileName(
@@ -1010,19 +1006,19 @@ class MainWindow(QMainWindow):
 		if not filepath:
 			return
 
-		self.status.setText(f"Status: Processing {filepath}...")
+		self.status.setText(f"Processing {filepath}...")
 		processing_script = ""  # TODO: set path to ML script
 
 		if not processing_script:
-			self.status.setText("Status: Processing script path not configured yet")
+			self.status.setText("Processing script not configured")
 			print("WARNING: processing_script path is empty")
 			return
 
 		try:
 			subprocess.Popen([sys.executable, processing_script, filepath])
-			self.status.setText(f"Status: Processing started for {filepath}")
+			self.status.setText(f"Processing started")
 		except Exception as e:
-			self.status.setText(f"Status: Processing failed - {str(e)}")
+			self.status.setText(f"Processing failed - {str(e)}")
 			print(f"Processing error: {e}")
 
 	def update_plot(self):
@@ -1080,7 +1076,7 @@ def main():
 	app.setStyleSheet(APP_STYLESHEET)
 
 	window = MainWindow(use_hardware=True)
-	window.resize(1000, 900)
+	window.resize(800, 400)
 	window.show()
 
 	sys.exit(app.exec())
