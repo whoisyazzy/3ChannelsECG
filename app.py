@@ -9,7 +9,6 @@ import queue
 from time import sleep
 import csv
 from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
-
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor
 from PyQt6.QtWidgets import (
@@ -17,7 +16,7 @@ from PyQt6.QtWidgets import (
 	QPushButton, QLabel, QLineEdit,
 	QVBoxLayout, QHBoxLayout, QGridLayout,
 	QFileDialog, QFrame, QSpacerItem, QSizePolicy,
-	QDialog, QDialogButtonBox, QComboBox
+	QDialog, QDialogButtonBox, QComboBox, QMessageBox
 )
 from PyQt6.QtGui import QIntValidator
 
@@ -286,6 +285,7 @@ class ADS1293:
 					return True
 				if (time.time() - start) * 1000 > timeout_ms:
 					return False
+
 
 	def _raw_to_mv(self, raw_unsigned):
 		"""
@@ -746,7 +746,41 @@ class ProcessParamsDialog(QDialog):
 			self.gender_input.currentText(),
 		)
 
+class SettingsDialog(QDialog):
+	def __init__(self, current_max_duration=60, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("Settings")
+		self.setModal(True)
+		self.resize(320, 140)
 
+		layout = QVBoxLayout(self)
+
+		label = QLabel("Max duration (seconds):")
+		label.setStyleSheet("font-size: 14px;")
+		layout.addWidget(label)
+
+		self.max_duration_input = QLineEdit(str(current_max_duration))
+		self.max_duration_input.setPlaceholderText("Enter max duration in seconds")
+		self.max_duration_input.setValidator(QIntValidator(1, 3600, self))
+		self.max_duration_input.setFixedHeight(32)
+		layout.addWidget(self.max_duration_input)
+
+		buttons = QDialogButtonBox(
+			QDialogButtonBox.StandardButton.Ok |
+			QDialogButtonBox.StandardButton.Cancel
+		)
+		buttons.accepted.connect(self.validate_and_accept)
+		buttons.rejected.connect(self.reject)
+		layout.addWidget(buttons)
+
+	def validate_and_accept(self):
+		if not self.max_duration_input.text().strip():
+			self.max_duration_input.setFocus()
+			return
+		self.accept()
+
+	def value(self):
+		return int(self.max_duration_input.text().strip())
 class MainWindow(QMainWindow):
 	"""Main GUI window for 3-channel ECG dashboard"""
 
@@ -757,7 +791,7 @@ class MainWindow(QMainWindow):
 		super().__init__()
 		self.setWindowTitle("ECG Monitor")
 		self.setObjectName("root")
-
+		self.max_duration = 60
 		self.use_hardware = use_hardware and SPI_AVAILABLE
 		self.ads1293 = None
 		self.acquisition_thread = None
@@ -802,7 +836,16 @@ class MainWindow(QMainWindow):
 		self.timer.timeout.connect(self.update_plot)
 
 	# -- Page builders ----------------------------------------------------------
-
+	def open_settings(self):
+		dialog = SettingsDialog(self.max_duration, self)
+		if dialog.exec():
+			self.max_duration = dialog.value()
+			self.status.setText(f"Max duration set to {self.max_duration} s")
+			QMessageBox.information(
+				self,
+				"Settings Updated",
+				f"Max duration is now set to {self.max_duration} seconds."
+			)
 	def _build_home_page(self):
 		page = QWidget()
 		page.setObjectName("homePage")
@@ -821,6 +864,16 @@ class MainWindow(QMainWindow):
 		card_layout = QVBoxLayout(card)
 		card_layout.setContentsMargins(40, 16, 40, 16)
 		card_layout.setSpacing(0)
+		settings_btn = QPushButton("Settings")
+		settings_btn.setObjectName("actionBtn")
+		settings_btn.setMinimumHeight(40)
+		settings_btn.setFixedWidth(200)
+		settings_btn.clicked.connect(self.open_settings)
+
+		settings_row = QHBoxLayout()
+		settings_row.addStretch()
+		settings_row.addWidget(settings_btn)
+		settings_row.addStretch()
 
 		# Title
 		title = QLabel("ECG MONITOR")
@@ -841,7 +894,6 @@ class MainWindow(QMainWindow):
 		mode_row.addStretch()
 		mode_row.addWidget(mode_chip)
 		mode_row.addStretch()
-
 		card_layout.addWidget(title)
 		card_layout.addSpacing(4)
 		card_layout.addWidget(subtitle)
@@ -855,7 +907,8 @@ class MainWindow(QMainWindow):
 		launch_btn.setFixedHeight(40)
 		launch_btn.setFixedWidth(200)
 		launch_btn.clicked.connect(self._launch_ecg)
-
+		card_layout.addLayout(settings_row)
+		card_layout.addSpacing(8)
 		exit_btn = QPushButton("Exit")
 		exit_btn.setObjectName("exitBtn")
 		exit_btn.setFixedHeight(40)
@@ -1080,14 +1133,13 @@ class MainWindow(QMainWindow):
 				"--nli", nli,
 				"--age", str(age),
 				"--gender", gender,
-				"--max_duration", "60",
+				"--max_duration", str(self.max_duration),
 			])
-			self.status.setText(f"Processing started")
-			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender}")
+			self.status.setText(f"Processing started (max duration: {self.max_duration}s)")
+			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender} max_duration={self.max_duration}")
 		except Exception as e:
 			self.status.setText(f"Processing failed - {str(e)}")
 			print(f"Processing error: {e}")
-
 	def update_plot(self):
 		if self.use_hardware:
 			for i in range(3):
