@@ -209,7 +209,7 @@ class ADS1293:
 			# 8. Internal reference
 			self.write_register(self.REG_REF_CN, 0x00)
 			self.write_register(self.REG_LOD_CN, 0x01)
-			self.write_register(self.REG_LOD_EN, 0x03)
+			self.write_register(self.REG_LOD_EN, 0x37)
 			self.write_register(self.REG_LOD_CURRENT, 0x02)
 
 
@@ -431,12 +431,24 @@ class ECGAcquisitionThread(threading.Thread):
 					self.ads1293.read_register(0x1A)  # Clear ERROR_RANGE1
 					self.ads1293.read_register(0x1B)  # Clear ERROR_RANGE2
 					self.ads1293.read_register(0x1C)  # Clear ERROR_RANGE3
+					self.ads1293.read_register(self.ads1293.REG_ERROR_LOD)
 					self.error_count = 0
 
 				lod_status = self.ads1293.read_register(self.ads1293.REG_ERROR_LOD)
 
+				IN1 = lod_status & 0x01
+				IN2 = lod_status & 0x02
+				IN3 = lod_status & 0x04
+				IN4 = lod_status & 0x08
+				IN5 = lod_status & 0x10
+				IN6 = lod_status & 0x20	
+
 				for i in range(3):
-					if lod_status != 0:
+					if i == 0 and (IN1 or IN2):
+						filtered = 0.0
+					elif i == 1 and (IN1 or IN3):
+						filtered = 0.0
+					elif i == 2 and (IN5 or IN6):
 						filtered = 0.0
 					else:
 						filtered = self._apply_filter(i, samples[i])
@@ -444,7 +456,7 @@ class ECGAcquisitionThread(threading.Thread):
 						# Clamp and reset on artifact
 						if abs(filtered) > 2.0:
 							filtered = 0.0
-							self._reset_filter(i, 0.0)
+							self._reset_filter(i, 0.0) 
 
 					if not self.data_queues[i].full():
 						self.data_queues[i].put(filtered)
