@@ -102,6 +102,8 @@ def predict_ais_from_cache(
     metrics_csv_path,
     predictions_csv_path,
     nli,
+    gender,
+    age,
     ecg_dir,
     ais_model_dir="ais_logreg_model",
     output_filename="ais_prediction.csv"
@@ -111,7 +113,13 @@ def predict_ais_from_cache(
     cache_dir = "cache"
     os.makedirs(cache_dir, exist_ok=True)
     output_path = os.path.join(cache_dir, output_filename)
-
+    def encode_gender_local(g):
+        g = str(g).strip().upper()
+        if g == "M":
+            return 1
+        if g == "F":
+            return 0
+        return np.nan
     # -----------------------------
     # 1️⃣ Above T6 check
     # -----------------------------
@@ -191,7 +199,8 @@ def predict_ais_from_cache(
         data_ids = data["Data ID"].astype(str).tolist()
         lfhf_dict = compute_lfhf_for_cache(data_ids, ecg_dir)
         data["LFHF"] = data["Data ID"].map(lfhf_dict)
-
+    data["Age"] = float(age) if age is not None else np.nan
+    data["Gender_binary"] = encode_gender_local(gender)
 
     # Ensure required features exist
     for col in feature_cols:
@@ -226,6 +235,8 @@ def predict_ais_from_cache(
     result_df = pd.DataFrame({
         "Data ID": data["Data ID"],
         "NLI": nli,
+        "Gender": gender,
+        "Age": age,
         "AIS Probability (C/D)": prob,
         "Predicted AIS": ais_label
     })
@@ -449,6 +460,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process and predict SCI conditions")
     metrics_output = "sci_ecg_metrics.csv"
     parser.add_argument(
+        "--gender",
+        type=str,
+        required=True,
+        help="Patient gender: M or F"
+    )
+    parser.add_argument(
+        "--age",
+        type=float,
+        required=True,
+        help="Patient age"
+    )
+    parser.add_argument(
         "--csv",
         type=str,
         required=True,
@@ -478,6 +501,8 @@ if __name__ == "__main__":
         metrics_csv_path=metrics_path,
         predictions_csv_path=predictions_path,
         nli=args.nli,
+        gender=args.gender,
+        age=args.age,
         ecg_dir="",   # <-- add this
     )
     convert_dir = "converted_sci"
