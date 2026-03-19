@@ -1,3 +1,4 @@
+import os
 import sys
 import subprocess
 import time
@@ -1075,10 +1076,11 @@ class MainWindow(QMainWindow):
 		try:
 			subprocess.Popen([
 				sys.executable, "Analysis.py",
-				"--csv", filepath,
+				"--csv", os.path.basename(filepath),
 				"--nli", nli,
 				"--age", str(age),
 				"--gender", gender,
+				"--max_duration", "60",
 			])
 			self.status.setText(f"Processing started")
 			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender}")

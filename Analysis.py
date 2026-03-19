@@ -414,7 +414,7 @@ def build_single_sci_metrics(
             loader._sci_iterator = iter([record_id])
 
             # 2️⃣ Load ECG
-            ecg = init_processing(max_duration)
+            ecg = init_processing(max_duration=max_duration)
             if ecg is None:
                 raise RuntimeError("init_processing returned None")
 
