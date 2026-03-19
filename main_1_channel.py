@@ -216,6 +216,10 @@ class ADS1293:
 
 			# 6. Reference: both internal refs ON
 			self.write_register(self.REG_REF_CN, 0x00)
+			self.write_register(self.REG_LOD_CN, 0x01)
+			self.write_register(self.REG_LOD_EN, 0x03)
+			self.write_register(self.REG_LOD_CURRENT, 0x02)
+
 			#print("  ✓ Internal reference enabled")
 
 			# 7. Oscillator: crystal first, then start clock
@@ -289,6 +293,18 @@ class ADS1293:
 			print(f"✗ ADS1293 initialization failed: {e}")
 			return False
 
+	def hardware_reset(self):
+		try:
+				#Toggle RSTB
+				lgpio.gpio_write(self.chip_handle, self.RSTB_PIN, 0)
+				sleep(0.2)
+				lgpio.gpio_write(self.chip_handle, self.RSTB_PIN, 1)
+
+				self.initialize()
+
+		except Exception as e:
+			print(f"Reset Failed: {e}")
+
 	def wait_for_drdy(self, timeout_ms=200):
 		"""
 		Wait for DRDY pin to go LOW (active low = data ready) using lgpio.
@@ -299,7 +315,7 @@ class ADS1293:
 			# lgpio_read returns 1 when HIGH, 0 when LOW
 			while lgpio.gpio_read(self.chip_handle, self.DRDY_GPIO_PIN) == 1:
 				if (time.time() - start) * 1000 > timeout_ms:
-					print("DRDY GPIO timeout")
+					self.hardware_reset()
 					return False
 			return True
 		else:
@@ -416,15 +432,25 @@ class ECGAcquisitionThread(threading.Thread):
 				if raw_sample is None:
 					continue
 
-				# Apply filter chain
-				filtered, self.zi_bp = sosfilt(self.sos_bp, [raw_sample], zi=self.zi_bp)
-				filtered, self.zi_notch60 = lfilter(self.b_notch60, self.a_notch60, filtered, zi=self.zi_notch60)
-				filtered, self.zi_notch120 = lfilter(self.b_notch120, self.a_notch120, filtered, zi=self.zi_notch120)
-				sample = filtered[0]
+				lod_status = self.ads1293.read_register(self.ads1293.REG_ERROR_LOD)
 
-				if not self.data_queue.full():
+				if lod_status != 0:
+					sample=0.0
+
+				else:
+
+					# Apply filter chain
+					filtered, self.zi_bp = sosfilt(self.sos_bp, [raw_sample], zi=self.zi_bp)
+					filtered, self.zi_notch60 = lfilter(self.b_notch60, self.a_notch60, filtered, zi=self.zi_notch60)
+					filtered, self.zi_notch120 = lfilter(self.b_notch120, self.a_notch120, filtered, zi=self.zi_notch120)
+					sample = filtered[0]
+
 					if abs(sample) > 5.0:
 						sample =0.0
+
+				
+
+				if not self.data_queue.full():
 					self.data_queue.put(sample)
 
 			except Exception as e:
