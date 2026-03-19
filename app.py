@@ -959,10 +959,15 @@ class MainWindow(QMainWindow):
 			self.btn_channel.setText("All")
 			for plot in self.plots:
 				plot.setVisible(True)
+			QTimer.singleShot(0, self._force_plot_resize)
 		else:
 			self.btn_channel.setText(channel_labels[self.active_channel])
 			for i, plot in enumerate(self.plots):
 				plot.setVisible(i == self.active_channel)
+
+	def _force_plot_resize(self):
+		for plot in self.plots:
+			plot.resize(plot.size())
 
 	def _launch_ecg(self):
 		self.stack.setCurrentIndex(1)
