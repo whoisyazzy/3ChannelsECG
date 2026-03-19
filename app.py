@@ -7,7 +7,6 @@ import threading
 import queue
 from time import sleep
 import csv
-from datetime import datetime
 from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
 
 from PyQt6.QtCore import QTimer, Qt
@@ -16,8 +15,10 @@ from PyQt6.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QStackedWidget,
 	QPushButton, QLabel, QLineEdit,
 	QVBoxLayout, QHBoxLayout, QGridLayout,
-	QFileDialog, QFrame, QSpacerItem, QSizePolicy
+	QFileDialog, QFrame, QSpacerItem, QSizePolicy,
+	QDialog, QDialogButtonBox, QComboBox
 )
+from PyQt6.QtGui import QIntValidator
 
 # Try to import spidev (only available on Raspberry Pi)
 try:
@@ -686,6 +687,65 @@ class EcgTraceWidget(QWidget):
 			painter.drawLine(int(x1), int(y1), int(x2), int(y2))
 
 
+class ProcessParamsDialog(QDialog):
+	"""Dialog to collect NLI, age, and gender before running the analysis script."""
+
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("Process ECG")
+		self.setMinimumWidth(280)
+
+		layout = QVBoxLayout(self)
+		layout.setSpacing(12)
+		layout.setContentsMargins(20, 20, 20, 20)
+
+		# NLI
+		layout.addWidget(QLabel("NLI"))
+		self.nli_input = QLineEdit()
+		self.nli_input.setPlaceholderText("Enter NLI value")
+		self.nli_input.setFixedHeight(32)
+		layout.addWidget(self.nli_input)
+
+		# Age
+		layout.addWidget(QLabel("Age"))
+		self.age_input = QLineEdit()
+		self.age_input.setPlaceholderText("Enter age")
+		self.age_input.setValidator(QIntValidator(0, 150, self))
+		self.age_input.setFixedHeight(32)
+		layout.addWidget(self.age_input)
+
+		# Gender
+		layout.addWidget(QLabel("Gender"))
+		self.gender_input = QComboBox()
+		self.gender_input.addItems(["F", "M"])
+		self.gender_input.setFixedHeight(32)
+		layout.addWidget(self.gender_input)
+
+		# Buttons
+		buttons = QDialogButtonBox(
+			QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+		)
+		buttons.accepted.connect(self._on_accept)
+		buttons.rejected.connect(self.reject)
+		layout.addWidget(buttons)
+
+	def _on_accept(self):
+		if not self.nli_input.text().strip():
+			self.nli_input.setFocus()
+			return
+		if not self.age_input.text().strip():
+			self.age_input.setFocus()
+			return
+		self.accept()
+
+	def values(self):
+		return (
+			self.nli_input.text().strip(),
+			int(self.age_input.text().strip()),
+			self.gender_input.currentText(),
+		)
+
+
 class MainWindow(QMainWindow):
 	"""Main GUI window for 3-channel ECG dashboard"""
 
@@ -978,11 +1038,8 @@ class MainWindow(QMainWindow):
 			self.status.setText("No data to save - record first!")
 			return
 
-		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-		default_name = f"ecg_{timestamp}.csv"
-
 		filepath, _ = QFileDialog.getSaveFileName(
-			self, "Save ECG Data", default_name, "CSV Files (*.csv);;All Files (*)"
+			self, "Save ECG Data", "recording.csv", "CSV Files (*.csv);;All Files (*)"
 		)
 		if not filepath:
 			return
@@ -990,17 +1047,14 @@ class MainWindow(QMainWindow):
 		try:
 			with open(filepath, 'w', newline='') as f:
 				writer = csv.writer(f)
-				writer.writerow(["Sample", "LeadI_mV", "LeadII_mV", "LeadV_mV"])
-				for i in range(len(self.buffers[0])):
-					ch1 = self.buffers[0][i] if i < len(self.buffers[0]) else 0.0
-					ch2 = self.buffers[1][i] if i < len(self.buffers[1]) else 0.0
-					ch3 = self.buffers[2][i] if i < len(self.buffers[2]) else 0.0
-					writer.writerow([i, ch1, ch2, ch3])
+				writer.writerow(["time (s)", "ecg (V)"])
+				for i, sample in enumerate(self.buffers[0]):
+					writer.writerow([round(i / self.sample_rate, 6), round(sample / 1000.0, 9)])
 
 			total = len(self.buffers[0])
 			filename = filepath.split('/')[-1]
 			self.status.setText(f"Saved {total} samples to {filename}")
-			print(f"Saved {total} samples × 3 channels to {filepath}")
+			print(f"Saved {total} samples (CH1) to {filepath}")
 
 		except Exception as e:
 			self.status.setText(f"Save failed - {str(e)}")
@@ -1012,17 +1066,22 @@ class MainWindow(QMainWindow):
 		if not filepath:
 			return
 
-		self.status.setText(f"Processing {filepath}...")
-		processing_script = ""  # TODO: set path to ML script
-
-		if not processing_script:
-			self.status.setText("Processing script not configured")
-			print("WARNING: processing_script path is empty")
+		dialog = ProcessParamsDialog(self)
+		if dialog.exec() != QDialog.DialogCode.Accepted:
 			return
 
+		nli, age, gender = dialog.values()
+
 		try:
-			subprocess.Popen([sys.executable, processing_script, filepath])
+			subprocess.Popen([
+				sys.executable, "Analysis.py",
+				"--csv", filepath,
+				"--nli", nli,
+				"--age", str(age),
+				"--gender", gender,
+			])
 			self.status.setText(f"Processing started")
+			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender}")
 		except Exception as e:
 			self.status.setText(f"Processing failed - {str(e)}")
 			print(f"Processing error: {e}")
