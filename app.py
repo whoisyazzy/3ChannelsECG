@@ -835,6 +835,27 @@ class MainWindow(QMainWindow):
 		self.timer = QTimer()
 		self.timer.timeout.connect(self.update_plot)
 
+	def get_ecg_duration_seconds(self, filepath):
+		try:
+			with open(filepath, "r", newline="") as f:
+				reader = csv.reader(f)
+				rows = list(reader)
+
+			if len(rows) <= 1:
+				return 0.0
+
+			# Try to use the last value in the time column
+			try:
+				last_time = float(rows[-1][0])
+				return last_time
+			except (ValueError, IndexError):
+				# Fallback: estimate from number of samples
+				sample_count = len(rows) - 1  # exclude header
+				return sample_count / self.sample_rate
+
+		except Exception as e:
+			print(f"Duration check error: {e}")
+			return 0.0
 	# -- Page builders ----------------------------------------------------------
 	def open_settings(self):
 		dialog = SettingsDialog(self.max_duration, self)
@@ -1118,6 +1139,20 @@ class MainWindow(QMainWindow):
 			self, "Select ECG Data File", "", "CSV Files (*.csv);;All Files (*)"
 		)
 		if not filepath:
+			return
+
+		duration = self.get_ecg_duration_seconds(filepath)
+
+		if duration < self.max_duration:
+			self.status.setText(
+				f"Error: ECG duration ({duration:.2f}s) is less than required {self.max_duration}s"
+			)
+			QMessageBox.warning(
+				self,
+				"Invalid ECG Duration",
+				f"The selected ECG file is only {duration:.2f} seconds long.\n"
+				f"It must be at least {self.max_duration} seconds."
+			)
 			return
 
 		dialog = ProcessParamsDialog(self)
