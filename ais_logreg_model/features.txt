@@ -1,16 +1,21 @@
-RR_min
-PR_mean
+HR_mean
+HR_std
+RR_std
+SDNN_mean
+pNN50_mean
 PR_std
 PR_min
 PR_max
+QRS_std
+QRS_min
 QRS_max
 T_amp
 T_min
 T_max
 ST_mean
-ST_std
-LFHF
+Age
+Gender_binary
 Sinus Bradycardia
-Sinus Tachycardia
-Supraventricular Tachycardia
-ST-T Change
+Sinus Irregularity
+1 degree atrioventricular block
+T wave Change
