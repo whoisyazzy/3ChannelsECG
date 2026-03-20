@@ -1,8 +1,10 @@
 import os
 import sys
+import shutil
 import subprocess
 import time
 import numpy as np
+import pandas as pd
 import pyqtgraph as pg
 import threading
 import queue
@@ -10,15 +12,15 @@ from time import sleep
 import csv
 from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QFont, QPainter, QPen, QColor
+from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QIntValidator
 from PyQt6.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QStackedWidget,
 	QPushButton, QLabel, QLineEdit,
 	QVBoxLayout, QHBoxLayout, QGridLayout,
 	QFileDialog, QFrame, QSpacerItem, QSizePolicy,
-	QDialog, QDialogButtonBox, QComboBox, QMessageBox
+	QDialog, QDialogButtonBox, QComboBox, QMessageBox,
+	QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea
 )
-from PyQt6.QtGui import QIntValidator
 
 # Try to import spidev (only available on Raspberry Pi)
 try:
@@ -649,6 +651,53 @@ QPushButton#exitBtn:pressed {
 QFrame#divider {
 	color: #21262d;
 }
+QWidget#loadingPage {
+	background-color: #0d1117;
+}
+QLabel#loadingStatus {
+	color: #8b9ab0;
+	font-size: 15px;
+	letter-spacing: 2px;
+}
+QWidget#resultsPage {
+	background-color: #0d1117;
+}
+QLabel#summaryCard {
+	background-color: #161b22;
+	color: #c9d1d9;
+	border: 1px solid #30363d;
+	border-radius: 8px;
+	padding: 10px 16px;
+	font-size: 11px;
+}
+QLabel#summaryCardAIS {
+	background-color: #1a4731;
+	color: #00e5a0;
+	border: 1px solid #00e5a0;
+	border-radius: 8px;
+	padding: 10px 16px;
+	font-size: 13px;
+	font-weight: bold;
+}
+QFrame#metricCard {
+	background-color: #161b22;
+	border: 1px solid #30363d;
+	border-radius: 8px;
+}
+QLabel#metricCardName {
+	color: #8b9ab0;
+	font-size: 10px;
+	letter-spacing: 1px;
+}
+QLabel#metricCardValue {
+	color: #c9d1d9;
+	font-size: 18px;
+	font-weight: bold;
+}
+QScrollArea {
+	background-color: transparent;
+	border: none;
+}
 """
 
 ECG_TRACE = [
@@ -829,11 +878,20 @@ class MainWindow(QMainWindow):
 		self.stack = QStackedWidget()
 		self.setCentralWidget(self.stack)
 
-		self.stack.addWidget(self._build_home_page())   # index 0
-		self.stack.addWidget(self._build_ecg_page())    # index 1
+		self.stack.addWidget(self._build_home_page())     # index 0
+		self.stack.addWidget(self._build_ecg_page())      # index 1
+		self.stack.addWidget(self._build_loading_page())  # index 2
+		self.stack.addWidget(self._build_results_page())  # index 3
 
 		self.timer = QTimer()
 		self.timer.timeout.connect(self.update_plot)
+
+		self._analysis_process = None
+		self._loading_dot_count = 0
+		self._loading_anim_timer = QTimer()
+		self._loading_anim_timer.timeout.connect(self._update_loading_dots)
+		self._poll_timer = QTimer()
+		self._poll_timer.timeout.connect(self._check_processing_done)
 
 	def get_ecg_duration_seconds(self, filepath):
 		try:
@@ -875,103 +933,53 @@ class MainWindow(QMainWindow):
 		outer.setContentsMargins(0, 0, 0, 0)
 		outer.setSpacing(0)
 
-		# Decorative ECG trace banner
-		trace = EcgTraceWidget()
-		outer.addWidget(trace)
-
 		# -- Content card -------------------------------------------------------
 		card = QWidget()
 		card.setObjectName("homePage")
 		card_layout = QVBoxLayout(card)
 		card_layout.setContentsMargins(40, 16, 40, 16)
 		card_layout.setSpacing(0)
-		settings_btn = QPushButton("Settings")
-		settings_btn.setObjectName("actionBtn")
-		settings_btn.setMinimumHeight(40)
-		settings_btn.setFixedWidth(200)
-		settings_btn.clicked.connect(self.open_settings)
-
-		settings_row = QHBoxLayout()
-		settings_row.addStretch()
-		settings_row.addWidget(settings_btn)
-		settings_row.addStretch()
 
 		# Title
 		title = QLabel("ECG MONITOR")
 		title.setObjectName("appTitle")
 		title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-		subtitle = QLabel("ADS1293 - Real-Time Cardiac Monitoring (3-Lead)")
-		subtitle.setObjectName("appSubtitle")
-		subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-		mode_text = "Hardware" if self.use_hardware else "Simulation"
-		mode_chip = QLabel(f"  {mode_text} Mode  ")
-		mode_chip.setObjectName("modeChip")
-		mode_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-		mode_chip.setFixedHeight(20)
-
-		mode_row = QHBoxLayout()
-		mode_row.addStretch()
-		mode_row.addWidget(mode_chip)
-		mode_row.addStretch()
 		card_layout.addWidget(title)
-		card_layout.addSpacing(4)
-		card_layout.addWidget(subtitle)
-		card_layout.addSpacing(8)
-		card_layout.addLayout(mode_row)
-		card_layout.addSpacing(20)
+		card_layout.addSpacing(24)
 
-		# Launch button
-		launch_btn = QPushButton("Launch Live ECG")
-		launch_btn.setObjectName("launchBtn")
-		launch_btn.setFixedHeight(40)
-		launch_btn.setFixedWidth(200)
-		launch_btn.clicked.connect(self._launch_ecg)
-		card_layout.addLayout(settings_row)
-		card_layout.addSpacing(8)
+		def _home_btn(label, slot):
+			btn = QPushButton(label)
+			btn.setObjectName("launchBtn")
+			btn.setFixedHeight(40)
+			btn.setFixedWidth(200)
+			btn.clicked.connect(slot)
+			row = QHBoxLayout()
+			row.addStretch()
+			row.addWidget(btn)
+			row.addStretch()
+			return row
+
+		card_layout.addLayout(_home_btn("Launch Live ECG",   self._launch_ecg))
+		card_layout.addSpacing(10)
+		card_layout.addLayout(_home_btn("Process ECG File",  self.process_data))
+		card_layout.addSpacing(10)
+		card_layout.addLayout(_home_btn("Settings",          self.open_settings))
+		card_layout.addSpacing(10)
+
 		exit_btn = QPushButton("Exit")
 		exit_btn.setObjectName("exitBtn")
 		exit_btn.setFixedHeight(40)
 		exit_btn.setFixedWidth(200)
 		exit_btn.clicked.connect(QApplication.instance().quit)
-
-		btn_row = QHBoxLayout()
-		btn_row.addStretch()
-		btn_row.addWidget(launch_btn)
-		btn_row.addStretch()
-
 		exit_row = QHBoxLayout()
 		exit_row.addStretch()
 		exit_row.addWidget(exit_btn)
 		exit_row.addStretch()
-
-		process_btn = QPushButton("Process ECG File")
-		process_btn.setObjectName("actionBtn")
-		process_btn.setFixedHeight(40)
-		process_btn.setFixedWidth(200)
-		process_btn.clicked.connect(self.process_data)
-
-		process_row = QHBoxLayout()
-		process_row.addStretch()
-		process_row.addWidget(process_btn)
-		process_row.addStretch()
-
-		card_layout.addLayout(btn_row)
-		card_layout.addSpacing(8)
-		card_layout.addLayout(process_row)
-		card_layout.addSpacing(12)
 		card_layout.addLayout(exit_row)
 		card_layout.addStretch()
 
 		outer.addWidget(card)
-
-		# Footer
-		footer = QLabel("Lead I  |  Lead II  |  Lead V  |  0.5-40 Hz Bandpass  |  853 SPS")
-		footer.setObjectName("appSubtitle")
-		footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-		footer.setContentsMargins(0, 0, 0, 8)
-		outer.addWidget(footer)
 
 		return page
 
@@ -1041,8 +1049,6 @@ class MainWindow(QMainWindow):
 		controls.addWidget(self.btn_start)
 		controls.addWidget(self.btn_stop)
 		controls.addStretch()
-		controls.addWidget(self.status)
-		controls.addStretch()
 		controls.addWidget(self.btn_save)
 		controls.addWidget(self.btn_channel)
 		controls.addWidget(self.btn_back)
@@ -1060,6 +1066,104 @@ class MainWindow(QMainWindow):
 		self.btn_save.clicked.connect(self.save_data)
 		self.btn_back.clicked.connect(self._go_home)
 		self.btn_channel.clicked.connect(self._toggle_channel)
+
+		return page
+
+	def _build_loading_page(self):
+		page = QWidget()
+		page.setObjectName("loadingPage")
+
+		outer = QVBoxLayout(page)
+		outer.setContentsMargins(0, 0, 0, 0)
+		outer.setSpacing(0)
+
+		trace = EcgTraceWidget()
+		outer.addWidget(trace)
+
+		center = QWidget()
+		center_layout = QVBoxLayout(center)
+		center_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		center_layout.setSpacing(20)
+
+		title = QLabel("Analyzing ECG Data")
+		title.setObjectName("appTitle")
+		title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		center_layout.addWidget(title)
+
+		self.loading_label = QLabel("Processing")
+		self.loading_label.setObjectName("loadingStatus")
+		self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		center_layout.addWidget(self.loading_label)
+
+		outer.addStretch()
+		outer.addWidget(center)
+		outer.addStretch()
+		return page
+
+	def _build_results_page(self):
+		page = QWidget()
+		page.setObjectName("resultsPage")
+
+		layout = QVBoxLayout(page)
+		layout.setContentsMargins(16, 12, 16, 12)
+		layout.setSpacing(12)
+
+		# Header
+		header = QHBoxLayout()
+		btn_back_results = QPushButton("< Back")
+		btn_back_results.setObjectName("backBtn")
+		btn_back_results.setFixedHeight(28)
+		btn_back_results.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+		title_lbl = QLabel("Analysis Results")
+		title_lbl.setObjectName("appTitle")
+		title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		header.addWidget(btn_back_results)
+		header.addStretch()
+		header.addWidget(title_lbl)
+		header.addStretch()
+		layout.addLayout(header)
+
+		# Summary cards
+		cards_row = QHBoxLayout()
+		cards_row.setSpacing(12)
+
+		self.card_nli = QLabel("NLI\n—")
+		self.card_nli.setObjectName("summaryCard")
+		self.card_nli.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+		self.card_ais = QLabel("Predicted AIS\n—")
+		self.card_ais.setObjectName("summaryCardAIS")
+		self.card_ais.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+		self.card_symptoms = QLabel("Predicted Symptoms\n—")
+		self.card_symptoms.setObjectName("summaryCard")
+		self.card_symptoms.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		self.card_symptoms.setWordWrap(True)
+
+		cards_row.addWidget(self.card_nli, 1)
+		cards_row.addWidget(self.card_ais, 1)
+		cards_row.addWidget(self.card_symptoms, 3)
+		layout.addLayout(cards_row)
+
+		# Divider
+		divider = QFrame()
+		divider.setFrameShape(QFrame.Shape.HLine)
+		divider.setObjectName("divider")
+		layout.addWidget(divider)
+
+		# Scrollable metric cards area
+		scroll = QScrollArea()
+		scroll.setWidgetResizable(True)
+		scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+		self.cards_container = QWidget()
+		self.cards_container.setObjectName("resultsPage")
+		self.cards_grid = QGridLayout(self.cards_container)
+		self.cards_grid.setSpacing(10)
+		self.cards_grid.setContentsMargins(4, 4, 4, 4)
+
+		scroll.setWidget(self.cards_container)
+		layout.addWidget(scroll, stretch=1)
 
 		return page
 
@@ -1161,8 +1265,13 @@ class MainWindow(QMainWindow):
 
 		nli, age, gender = dialog.values()
 
+		# Clear stale cache before each run
+		if os.path.exists("cache"):
+			shutil.rmtree("cache")
+			print("Cleared cache folder")
+
 		try:
-			subprocess.Popen([
+			self._analysis_process = subprocess.Popen([
 				sys.executable, "Analysis.py",
 				"--csv", os.path.basename(filepath),
 				"--nli", nli,
@@ -1170,11 +1279,170 @@ class MainWindow(QMainWindow):
 				"--gender", gender,
 				"--max_duration", str(self.max_duration),
 			])
-			self.status.setText(f"Processing started (Processing duration: {self.max_duration}s)")
 			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender} max_duration={self.max_duration}")
+			# Show loading page and start polling
+			self._loading_dot_count = 0
+			self.loading_label.setText("Processing")
+			self.stack.setCurrentIndex(2)
+			self._loading_anim_timer.start(400)
+			self._poll_timer.start(500)
 		except Exception as e:
 			self.status.setText(f"Processing failed - {str(e)}")
 			print(f"Processing error: {e}")
+
+	def _update_loading_dots(self):
+		self._loading_dot_count = (self._loading_dot_count + 1) % 4
+		self.loading_label.setText("Processing" + " ." * self._loading_dot_count)
+
+	def _check_processing_done(self):
+		if self._analysis_process is None or self._analysis_process.poll() is not None:
+			self._poll_timer.stop()
+			self._loading_anim_timer.stop()
+			returncode = self._analysis_process.returncode if self._analysis_process else -1
+			if returncode == 0:
+				self._load_results()
+				self.stack.setCurrentIndex(3)
+			else:
+				self.stack.setCurrentIndex(0)
+				self.status.setText(f"Processing failed (exit code {returncode})")
+
+	def _load_results(self):
+		try:
+			metrics = pd.read_csv(os.path.join("cache", "sci_ecg_metrics.csv"))
+		except Exception:
+			metrics = pd.DataFrame()
+
+		try:
+			preds = pd.read_csv(os.path.join("cache", "sci_condition_predictions.csv"))[["Data ID", "Predicted Labels"]]
+		except Exception:
+			preds = pd.DataFrame(columns=["Data ID", "Predicted Labels"])
+
+		ais_label, nli_val = "Not Applicable", "—"
+		try:
+			ais_df = pd.read_csv(os.path.join("cache", "ais_prediction.csv"))
+			if not ais_df.empty:
+				ais_label = str(ais_df["Predicted AIS"].iloc[0])
+				nli_val   = str(ais_df["NLI"].iloc[0])
+		except Exception:
+			pass
+
+		# Update summary cards
+		self.card_nli.setText(f"NLI\n{nli_val}")
+		self.card_ais.setText(f"Predicted AIS\n{ais_label}")
+
+		if not preds.empty:
+			all_syms = ";".join(preds["Predicted Labels"].fillna("").tolist())
+			unique = list(dict.fromkeys(s.strip() for s in all_syms.split(";") if s.strip()))
+			self.card_symptoms.setText("Predicted Symptoms\n" + ("\n".join(unique) if unique else "None detected"))
+		else:
+			self.card_symptoms.setText("Predicted Symptoms\n—")
+
+		# Average metrics across intervals
+		if not metrics.empty:
+			numeric_cols = metrics.select_dtypes(include=[np.number]).columns.tolist()
+			avg = metrics[numeric_cols].mean()
+		else:
+			avg = pd.Series(dtype=float)
+
+		# Clear previous cards
+		while self.cards_grid.count():
+			item = self.cards_grid.takeAt(0)
+			if item.widget():
+				item.widget().deleteLater()
+
+		# Metric groups: (group_title, [(column_name, display_label), ...])
+		GROUPS = [
+			("Heart Rate & Rhythm", [
+				("Heart Rate (bpm)",     "Heart Rate"),
+				("Heart Rate Std (bpm)", "HR Std"),
+			]),
+			("RR Intervals", [
+				("RR Interval (ms)", "RR Mean"),
+				("RR Std (ms)",      "RR Std"),
+				("RR Min (ms)",      "RR Min"),
+				("RR Max (ms)",      "RR Max"),
+			]),
+			("HRV", [
+				("SDNN (ms)",   "SDNN"),
+				("RMSSD (ms)",  "RMSSD"),
+				("pNN50 (%)",   "pNN50"),
+			]),
+			("Conduction", [
+				("PR Interval (ms)", "PR Interval"),
+			]),
+			("Ventricular", [
+				("QRS Duration (ms)", "QRS Duration"),
+				("QTc (ms)",          "QTc"),
+			]),
+			("Repolarization / ST", [
+				("T Wave Amplitude (mV)", "T Wave Amp"),
+				("ST Level Mean (mV)",    "ST Mean"),
+				("ST Level Std (mV)",     "ST Std"),
+			]),
+		]
+
+		COLS_PER_ROW = 4
+		grid_row = 0
+		grid_col = 0
+
+		for group_title, metrics_list in GROUPS:
+			# Section header spanning full width
+			section_lbl = QLabel(group_title.upper())
+			section_lbl.setObjectName("sectionLabel")
+			section_lbl.setContentsMargins(4, 8, 0, 2)
+			if grid_col != 0:
+				grid_row += 1
+				grid_col = 0
+			self.cards_grid.addWidget(section_lbl, grid_row, 0, 1, COLS_PER_ROW)
+			grid_row += 1
+			grid_col = 0
+
+			for col_name, display_name in metrics_list:
+				val = avg.get(col_name, None)
+				if val is None or pd.isna(val):
+					val_text = "—"
+				else:
+					val_text = f"{val:.2f}"
+
+				# Extract unit from column name (text inside parentheses)
+				unit = ""
+				if "(" in col_name:
+					unit = col_name[col_name.index("(")+1 : col_name.index(")")]
+
+				card = QFrame()
+				card.setObjectName("metricCard")
+				card.setMinimumHeight(80)
+				card_layout = QVBoxLayout(card)
+				card_layout.setContentsMargins(12, 10, 12, 10)
+				card_layout.setSpacing(4)
+
+				name_lbl = QLabel(display_name)
+				name_lbl.setObjectName("metricCardName")
+
+				val_lbl = QLabel(val_text)
+				val_lbl.setObjectName("metricCardValue")
+
+				unit_lbl = QLabel(unit)
+				unit_lbl.setObjectName("metricCardName")
+
+				card_layout.addWidget(name_lbl)
+				card_layout.addWidget(val_lbl)
+				card_layout.addWidget(unit_lbl)
+				card_layout.addStretch()
+
+				self.cards_grid.addWidget(card, grid_row, grid_col)
+				grid_col += 1
+				if grid_col >= COLS_PER_ROW:
+					grid_col = 0
+					grid_row += 1
+
+			if grid_col != 0:
+				grid_row += 1
+				grid_col = 0
+
+		# Push cards to top
+		self.cards_grid.setRowStretch(grid_row, 1)
+
 	def update_plot(self):
 		if self.use_hardware:
 			for i in range(3):
