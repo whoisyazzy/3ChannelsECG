@@ -12,7 +12,7 @@ from time import sleep
 import csv
 from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QIntValidator
+from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QStackedWidget,
 	QPushButton, QLabel, QLineEdit,
@@ -700,43 +700,6 @@ QScrollArea {
 }
 """
 
-ECG_TRACE = [
-	0, 0, 0, 0, 0.05, 0.1, 0.05, 0,
-	0, -0.1, 0.3, 1.0, -0.3, 0, 0.1, 0.15,
-	0.12, 0.1, 0.08, 0.06, 0.04, 0.02, 0,
-	0, 0, 0, 0, 0, 0, 0, 0,
-]
-
-
-class EcgTraceWidget(QWidget):
-	"""Decorative static ECG trace drawn in the home page header."""
-
-	def __init__(self, parent=None):
-		super().__init__(parent)
-		self.setFixedHeight(40)
-
-	def paintEvent(self, event):
-		painter = QPainter(self)
-		painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-		pen = QPen(QColor("#00e5a0"), 2)
-		painter.setPen(pen)
-
-		w, h = self.width(), self.height()
-		mid_y = h / 2
-		scale_y = h * 0.38
-		repeats = (w // (len(ECG_TRACE) * 4)) + 2
-		points = ECG_TRACE * repeats
-		n = len(points)
-		x_step = w / max(n - 1, 1)
-
-		for i in range(n - 1):
-			x1 = i * x_step
-			y1 = mid_y - points[i] * scale_y
-			x2 = (i + 1) * x_step
-			y2 = mid_y - points[i + 1] * scale_y
-			painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-
-
 class ProcessParamsDialog(QDialog):
 	"""Dialog to collect NLI, age, and gender before running the analysis script."""
 
@@ -1076,9 +1039,6 @@ class MainWindow(QMainWindow):
 		outer = QVBoxLayout(page)
 		outer.setContentsMargins(0, 0, 0, 0)
 		outer.setSpacing(0)
-
-		trace = EcgTraceWidget()
-		outer.addWidget(trace)
 
 		center = QWidget()
 		center_layout = QVBoxLayout(center)
