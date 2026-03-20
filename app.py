@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 	QVBoxLayout, QHBoxLayout, QGridLayout,
 	QFileDialog, QFrame, QSpacerItem, QSizePolicy,
 	QDialog, QDialogButtonBox, QComboBox, QMessageBox,
-	QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea
+	QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QScroller
 )
 
 # Try to import spidev (only available on Raspberry Pi)
@@ -1155,6 +1155,11 @@ class MainWindow(QMainWindow):
 		scroll = QScrollArea()
 		scroll.setWidgetResizable(True)
 		scroll.setFrameShape(QFrame.Shape.NoFrame)
+		scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+		scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+		# Enable drag-to-scroll (finger/mouse drag on the content)
+		QScroller.grabGesture(scroll.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
 
 		self.cards_container = QWidget()
 		self.cards_container.setObjectName("resultsPage")
