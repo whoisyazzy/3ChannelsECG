@@ -1173,11 +1173,13 @@ class MainWindow(QMainWindow):
 		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(True)
 		self._update_timer_label()
+		self._record_start_time = time.time()
 		self._countdown_timer.start()
 		print(f"Started recording for {duration}s")
 
 	def stop_recording(self):
 		self.recording = False
+		elapsed = time.time() - self._record_start_time
 		self._countdown_timer.stop()
 		self._countdown_remaining = 0
 		self.recording_timer_label.setText("")
@@ -1186,6 +1188,8 @@ class MainWindow(QMainWindow):
 		self.status.setText(f"Stopped ({mode}) - {total} samples/ch")
 		self.btn_start.setEnabled(True)
 		self.btn_stop.setEnabled(False)
+		print("elapsed=", elapsed)
+		print("effective fs = ", total/elapsed)
 		print(f"Stopped recording - captured {total} samples/ch")
 
 	def _update_timer_label(self):
