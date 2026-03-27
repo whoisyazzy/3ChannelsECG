@@ -811,13 +811,11 @@ class MainWindow(QMainWindow):
 
 		self.recording = False
 		self.buffers = [[], [], []]  # One buffer per channel
-		self.sample_rate = 694
+		self.sample_rate = 724  # measured effective fs: 723.81 Hz
 		self.display_seconds = 4
 		self.display_samples = self.sample_rate * self.display_seconds
 		self.sim_time = 0
-		self._sim_sample_acc = 0.0  # fractional sample accumulator for exact 853 Hz in simulation
-		self._record_start_time = None
-		self._record_stop_time = None
+		self._sim_sample_acc = 0.0  # fractional accumulator for exact-rate simulation batching
 
 		# Data arrays and queues for 3 channels
 		self.data = [np.zeros(self.display_samples) for _ in range(3)]
@@ -1173,13 +1171,11 @@ class MainWindow(QMainWindow):
 		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(True)
 		self._update_timer_label()
-		self._record_start_time = time.time()
 		self._countdown_timer.start()
 		print(f"Started recording for {duration}s")
 
 	def stop_recording(self):
 		self.recording = False
-		elapsed = time.time() - self._record_start_time
 		self._countdown_timer.stop()
 		self._countdown_remaining = 0
 		self.recording_timer_label.setText("")
@@ -1188,8 +1184,6 @@ class MainWindow(QMainWindow):
 		self.status.setText(f"Stopped ({mode}) - {total} samples/ch")
 		self.btn_start.setEnabled(True)
 		self.btn_stop.setEnabled(False)
-		print("elapsed=", elapsed)
-		print("effective fs = ", total/elapsed)
 		print(f"Stopped recording - captured {total} samples/ch")
 
 	def _update_timer_label(self):
