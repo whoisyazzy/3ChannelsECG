@@ -816,6 +816,8 @@ class MainWindow(QMainWindow):
 		self.display_samples = self.sample_rate * self.display_seconds
 		self.sim_time = 0
 		self._sim_sample_acc = 0.0  # fractional accumulator for exact-rate simulation batching
+		self._record_start_time = None
+		self._record_stop_time = None
 
 		# Data arrays and queues for 3 channels
 		self.data = [np.zeros(self.display_samples) for _ in range(3)]
@@ -1171,10 +1173,12 @@ class MainWindow(QMainWindow):
 		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(True)
 		self._update_timer_label()
+		self._record_start_time = time.time()
 		self._countdown_timer.start()
 		print(f"Started recording for {duration}s")
 
 	def stop_recording(self):
+		self._record_stop_time = time.time()
 		self.recording = False
 		self._countdown_timer.stop()
 		self._countdown_remaining = 0
@@ -1184,7 +1188,10 @@ class MainWindow(QMainWindow):
 		self.status.setText(f"Stopped ({mode}) - {total} samples/ch")
 		self.btn_start.setEnabled(True)
 		self.btn_stop.setEnabled(False)
+		elapsed = self._record_stop_time - self._record_start_time
 		print(f"Stopped recording - captured {total} samples/ch")
+		print(f"  elapsed = {elapsed:.3f}s")
+		print(f"  effective fs = {total / elapsed:.2f} Hz")
 
 	def _update_timer_label(self):
 		mins = self._countdown_remaining // 60
