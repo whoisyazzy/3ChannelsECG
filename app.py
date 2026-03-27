@@ -795,41 +795,6 @@ class RecordingDurationDialog(QDialog):
 		return int(self.duration_input.text().strip())
 
 
-class SettingsDialog(QDialog):
-	def __init__(self, current_max_duration=60, parent=None):
-		super().__init__(parent)
-		self.setWindowTitle("Settings")
-		self.setModal(True)
-		self.resize(320, 140)
-
-		layout = QVBoxLayout(self)
-
-		label = QLabel("Processing duration (seconds):")
-		label.setStyleSheet("font-size: 14px;")
-		layout.addWidget(label)
-
-		self.max_duration_input = QLineEdit(str(current_max_duration))
-		self.max_duration_input.setPlaceholderText("Enter Signal Processing Duration In Seconds")
-		self.max_duration_input.setValidator(QIntValidator(1, 3600, self))
-		self.max_duration_input.setFixedHeight(32)
-		layout.addWidget(self.max_duration_input)
-
-		buttons = QDialogButtonBox(
-			QDialogButtonBox.StandardButton.Ok |
-			QDialogButtonBox.StandardButton.Cancel
-		)
-		buttons.accepted.connect(self.validate_and_accept)
-		buttons.rejected.connect(self.reject)
-		layout.addWidget(buttons)
-
-	def validate_and_accept(self):
-		if not self.max_duration_input.text().strip():
-			self.max_duration_input.setFocus()
-			return
-		self.accept()
-
-	def value(self):
-		return int(self.max_duration_input.text().strip())
 class MainWindow(QMainWindow):
 	"""Main GUI window for 3-channel ECG dashboard"""
 
@@ -840,7 +805,6 @@ class MainWindow(QMainWindow):
 		super().__init__()
 		self.setWindowTitle("ECG Monitor")
 		self.setObjectName("root")
-		self.max_duration = 60
 		self.use_hardware = use_hardware and SPI_AVAILABLE
 		self.ads1293 = None
 		self.acquisition_thread = None
@@ -920,16 +884,6 @@ class MainWindow(QMainWindow):
 			print(f"Duration check error: {e}")
 			return 0.0
 	# -- Page builders ----------------------------------------------------------
-	def open_settings(self):
-		dialog = SettingsDialog(self.max_duration, self)
-		if dialog.exec():
-			self.max_duration = dialog.value()
-			self.status.setText(f"Processing duration set to {self.max_duration} s")
-			QMessageBox.information(
-				self,
-				"Settings Updated",
-				f"Processing duration is now set to {self.max_duration} seconds."
-			)
 	def _build_home_page(self):
 		page = QWidget()
 		page.setObjectName("homePage")
@@ -968,8 +922,6 @@ class MainWindow(QMainWindow):
 		card_layout.addLayout(_home_btn("Launch Live ECG",   self._launch_ecg))
 		card_layout.addSpacing(10)
 		card_layout.addLayout(_home_btn("Process ECG File",  self.process_data))
-		card_layout.addSpacing(10)
-		card_layout.addLayout(_home_btn("Settings",          self.open_settings))
 		card_layout.addSpacing(10)
 
 		exit_btn = QPushButton("Exit")
@@ -1314,18 +1266,6 @@ class MainWindow(QMainWindow):
 
 		duration = self.get_ecg_duration_seconds(filepath)
 
-		if duration < self.max_duration:
-			self.status.setText(
-				f"Error: ECG duration ({duration:.2f}s) is less than required {self.max_duration}s"
-			)
-			QMessageBox.warning(
-				self,
-				"Invalid ECG Duration",
-				f"The selected ECG file is only {duration:.2f} seconds long.\n"
-				f"It must be at least {self.max_duration} seconds."
-			)
-			return
-
 		dialog = ProcessParamsDialog(self)
 		if dialog.exec() != QDialog.DialogCode.Accepted:
 			return
@@ -1344,9 +1284,9 @@ class MainWindow(QMainWindow):
 				"--nli", nli,
 				"--age", str(age),
 				"--gender", gender,
-				"--max_duration", str(self.max_duration),
+				"--max_duration", str(int(duration)),
 			])
-			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender} max_duration={self.max_duration}")
+			print(f"Processing: {filepath} | NLI={nli} age={age} gender={gender} max_duration={int(duration)}")
 			# Show loading page and start polling
 			self._loading_dot_count = 0
 			self.loading_label.setText("Processing")
