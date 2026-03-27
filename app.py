@@ -818,6 +818,7 @@ class MainWindow(QMainWindow):
 		self._sim_sample_acc = 0.0  # fractional accumulator for exact-rate simulation batching
 		self._record_start_time = None
 		self._record_stop_time = None
+		self._record_target_samples = 0  # exact sample count to capture (duration × sample_rate)
 
 		# Data arrays and queues for 3 channels
 		self.data = [np.zeros(self.display_samples) for _ in range(3)]
@@ -1162,20 +1163,28 @@ class MainWindow(QMainWindow):
 		dialog = RecordingDurationDialog(self)
 		if dialog.exec() != QDialog.DialogCode.Accepted:
 			return
-		duration = dialog.value()
+		self._pending_duration = dialog.value()
 
+		self.btn_start.setEnabled(False)
+		self.btn_stop.setEnabled(False)
+		QMessageBox.information(self, "Recording", "Recording Started")
+		self.status.setText("Recording starts in 3 seconds...")
+		QTimer.singleShot(3000, self._begin_recording)
+
+	def _begin_recording(self):
+		duration = self._pending_duration
+		self._record_target_samples = duration * self.sample_rate
 		self.recording = True
 		self._countdown_remaining = duration
 		for buf in self.buffers:
 			buf.clear()
 		mode = "Hardware" if self.use_hardware else "Simulation"
 		self.status.setText(f"Recording... ({mode})")
-		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(True)
 		self._update_timer_label()
 		self._record_start_time = time.time()
 		self._countdown_timer.start()
-		print(f"Started recording for {duration}s")
+		print(f"Started recording for {duration}s — target {self._record_target_samples} samples")
 
 	def stop_recording(self):
 		self._record_stop_time = time.time()
@@ -1198,13 +1207,20 @@ class MainWindow(QMainWindow):
 		secs = self._countdown_remaining % 60
 		self.recording_timer_label.setText(f"  {mins:02d}:{secs:02d}  ")
 
+	def _finish_recording(self):
+		"""Called when the target sample count is reached or the safety timer fires."""
+		if not self.recording:
+			return  # already stopped (e.g. user clicked Stop)
+		self.stop_recording()
+		QMessageBox.information(self, "Recording", "Recording Done")
+		self.auto_save_data()
+
 	def _countdown_tick(self):
 		self._countdown_remaining -= 1
 		if self._countdown_remaining <= 0:
 			self._countdown_remaining = 0
 			self.recording_timer_label.setText("  00:00  ")
-			self.stop_recording()
-			self.auto_save_data()
+			self._finish_recording()  # safety fallback if sample count wasn't reached
 		else:
 			self._update_timer_label()
 
@@ -1485,6 +1501,13 @@ class MainWindow(QMainWindow):
 
 				self.data[i] = np.roll(self.data[i], -1)
 				self.data[i][-1] = sample
+
+		# Stop recording once the exact target sample count is reached
+		if self.recording and self._record_target_samples > 0:
+			if len(self.buffers[0]) >= self._record_target_samples:
+				for buf in self.buffers:
+					del buf[self._record_target_samples:]  # trim any overshoot
+				QTimer.singleShot(0, self._finish_recording)
 
 		for i in range(3):
 			self.curves[i].setData(self.time_axis, self.data[i])
