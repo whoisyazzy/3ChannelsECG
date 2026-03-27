@@ -230,7 +230,7 @@ class ADS1293:
 
 			self.write_register(self.REG_AFE_FAULT_CN, 0x07)
 
-			# 12. Decimation rates: R2=5, R3=6 for all channels
+			# 12. Decimation rates: R2=5 (0x02), R3=24 (0x02) for all channels → ~694 Hz ODR
 			self.write_register(self.REG_R2_RATE, 0x02)
 			self.write_register(self.REG_R3_RATE_CH1, 0x02)
 			self.write_register(self.REG_R3_RATE_CH2, 0x02)
@@ -811,10 +811,13 @@ class MainWindow(QMainWindow):
 
 		self.recording = False
 		self.buffers = [[], [], []]  # One buffer per channel
-		self.sample_rate = 853
+		self.sample_rate = 694
 		self.display_seconds = 4
 		self.display_samples = self.sample_rate * self.display_seconds
 		self.sim_time = 0
+		self._sim_sample_acc = 0.0  # fractional sample accumulator for exact 853 Hz in simulation
+		self._record_start_time = None
+		self._record_stop_time = None
 
 		# Data arrays and queues for 3 channels
 		self.data = [np.zeros(self.display_samples) for _ in range(3)]
