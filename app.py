@@ -311,6 +311,25 @@ class ADS1293:
 
 		return (raw_unsigned / ADC_MAX - 0.5) * 2.0 * VREF_MV / INA_GAIN
 
+	def measure_sample_rate(self, duration=3.0):
+		"""
+		Measure the actual ODR by counting DRDY-triggered reads over a timed window.
+		Returns the measured sample rate in Hz (rounded to nearest integer).
+		"""
+		print(f"Measuring actual ODR over {duration}s — please wait...")
+		count = 0
+		t_start = time.time()
+		t_end = t_start + duration
+		while time.time() < t_end:
+			if self.wait_for_drdy():
+				# Burst-read to clear DRDY, then discard
+				self.read_registers(self.REG_DATA_CH1_ECG_H, 9)
+				count += 1
+		elapsed = time.time() - t_start
+		measured = round(count / elapsed)
+		print(f"★ Measured ODR: {count} samples in {elapsed:.3f}s = {measured} Hz")
+		return measured
+
 	def read_ecg_all_channels(self):
 		"""
 		Wait for DRDY then burst-read all 3 ECG channels (9 bytes: 0x37-0x3F).
@@ -371,6 +390,9 @@ class ECGAcquisitionThread(threading.Thread):
 		self.daemon = True
 		self.ch3_settle_counter =0
 		self.ch3_settling = False
+
+		t_start = time.time()
+		count = 0
 		
 
 		# Create filter chains for each channel
@@ -828,11 +850,15 @@ class MainWindow(QMainWindow):
 			try:
 				self.ads1293 = ADS1293(bus=0, device=0, sample_rate=self.sample_rate)
 				if self.ads1293.initialize():
+					measured = self.ads1293.measure_sample_rate(duration=3.0)
+					self.sample_rate = measured
+					self.display_samples = self.sample_rate * self.display_seconds
+					self.data = [np.zeros(self.display_samples) for _ in range(3)]
 					self.acquisition_thread = ECGAcquisitionThread(
 						self.ads1293, self.data_queues, sample_rate=self.sample_rate
 					)
 					self.acquisition_thread.start()
-					print("✓ Hardware mode active — 3 channels")
+					print(f"✓ Hardware mode active — 3 channels @ {self.sample_rate} Hz")
 				else:
 					print("✗ Hardware initialization failed - falling back to simulation")
 					self.use_hardware = False
