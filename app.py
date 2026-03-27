@@ -758,6 +758,43 @@ class ProcessParamsDialog(QDialog):
 			self.gender_input.currentText(),
 		)
 
+class RecordingDurationDialog(QDialog):
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("Set Recording Duration")
+		self.setModal(True)
+		self.resize(320, 140)
+
+		layout = QVBoxLayout(self)
+
+		label = QLabel("Recording duration (seconds):")
+		label.setStyleSheet("font-size: 14px;")
+		layout.addWidget(label)
+
+		self.duration_input = QLineEdit("60")
+		self.duration_input.setPlaceholderText("Enter recording duration in seconds")
+		self.duration_input.setValidator(QIntValidator(1, 3600, self))
+		self.duration_input.setFixedHeight(32)
+		layout.addWidget(self.duration_input)
+
+		buttons = QDialogButtonBox(
+			QDialogButtonBox.StandardButton.Ok |
+			QDialogButtonBox.StandardButton.Cancel
+		)
+		buttons.accepted.connect(self.validate_and_accept)
+		buttons.rejected.connect(self.reject)
+		layout.addWidget(buttons)
+
+	def validate_and_accept(self):
+		if not self.duration_input.text().strip():
+			self.duration_input.setFocus()
+			return
+		self.accept()
+
+	def value(self):
+		return int(self.duration_input.text().strip())
+
+
 class SettingsDialog(QDialog):
 	def __init__(self, current_max_duration=60, parent=None):
 		super().__init__(parent)
@@ -855,6 +892,11 @@ class MainWindow(QMainWindow):
 		self._loading_anim_timer.timeout.connect(self._update_loading_dots)
 		self._poll_timer = QTimer()
 		self._poll_timer.timeout.connect(self._check_processing_done)
+
+		self._countdown_remaining = 0
+		self._countdown_timer = QTimer()
+		self._countdown_timer.setInterval(1000)
+		self._countdown_timer.timeout.connect(self._countdown_tick)
 
 	def get_ecg_duration_seconds(self, filepath):
 		try:
@@ -958,11 +1000,14 @@ class MainWindow(QMainWindow):
 		self.btn_start.setObjectName("startBtn")
 		self.btn_stop = QPushButton("Stop")
 		self.btn_stop.setObjectName("stopBtn")
-		self.btn_save = QPushButton("Save")
-		self.btn_save.setObjectName("actionBtn")
 		self.btn_back = QPushButton("< Home")
 		self.btn_back.setObjectName("backBtn")
 		self.btn_stop.setEnabled(False)
+
+		self.recording_timer_label = QLabel("")
+		self.recording_timer_label.setObjectName("recordingTimerLabel")
+		self.recording_timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		self.recording_timer_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #00ff00;")
 
 		# Channel toggle button
 		self.btn_channel = QPushButton("All")
@@ -1012,7 +1057,8 @@ class MainWindow(QMainWindow):
 		controls.addWidget(self.btn_start)
 		controls.addWidget(self.btn_stop)
 		controls.addStretch()
-		controls.addWidget(self.btn_save)
+		controls.addWidget(self.recording_timer_label)
+		controls.addStretch()
 		controls.addWidget(self.btn_channel)
 		controls.addWidget(self.btn_back)
 
@@ -1026,7 +1072,6 @@ class MainWindow(QMainWindow):
 
 		self.btn_start.clicked.connect(self.start_recording)
 		self.btn_stop.clicked.connect(self.stop_recording)
-		self.btn_save.clicked.connect(self.save_data)
 		self.btn_back.clicked.connect(self._go_home)
 		self.btn_channel.clicked.connect(self._toggle_channel)
 
@@ -1159,23 +1204,80 @@ class MainWindow(QMainWindow):
 		self.stack.setCurrentIndex(0)
 
 	def start_recording(self):
+		dialog = RecordingDurationDialog(self)
+		if dialog.exec() != QDialog.DialogCode.Accepted:
+			return
+		duration = dialog.value()
+
 		self.recording = True
+		self._countdown_remaining = duration
 		for buf in self.buffers:
 			buf.clear()
 		mode = "Hardware" if self.use_hardware else "Simulation"
 		self.status.setText(f"Recording... ({mode})")
 		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(True)
-		print("Started recording")
+		self._update_timer_label()
+		self._countdown_timer.start()
+		print(f"Started recording for {duration}s")
 
 	def stop_recording(self):
 		self.recording = False
+		self._countdown_timer.stop()
+		self._countdown_remaining = 0
+		self.recording_timer_label.setText("")
 		total = len(self.buffers[0])
 		mode = "Hardware" if self.use_hardware else "Simulation"
 		self.status.setText(f"Stopped ({mode}) - {total} samples/ch")
 		self.btn_start.setEnabled(True)
 		self.btn_stop.setEnabled(False)
 		print(f"Stopped recording - captured {total} samples/ch")
+
+	def _update_timer_label(self):
+		mins = self._countdown_remaining // 60
+		secs = self._countdown_remaining % 60
+		self.recording_timer_label.setText(f"  {mins:02d}:{secs:02d}  ")
+
+	def _countdown_tick(self):
+		self._countdown_remaining -= 1
+		if self._countdown_remaining <= 0:
+			self._countdown_remaining = 0
+			self.recording_timer_label.setText("  00:00  ")
+			self.stop_recording()
+			self.auto_save_data()
+		else:
+			self._update_timer_label()
+
+	def auto_save_data(self):
+		if len(self.buffers[0]) == 0:
+			self.status.setText("No data to save - record first!")
+			return
+
+		filepath, _ = QFileDialog.getSaveFileName(
+			self, "Save ECG Recording", "recording.csv", "CSV Files (*.csv);;All Files (*)"
+		)
+		if not filepath:
+			return
+
+		try:
+			with open(filepath, 'w', newline='') as f:
+				writer = csv.writer(f)
+				writer.writerow(["time (s)", "ecg (V)"])
+				for i, sample in enumerate(self.buffers[0]):
+					writer.writerow([round(i / self.sample_rate, 6), round(sample / 1000.0, 9)])
+
+			total = len(self.buffers[0])
+			filename = filepath.split('/')[-1]
+			self.status.setText(f"Saved {total} samples to {filename}")
+			QMessageBox.information(
+				self,
+				"Recording Saved",
+				f"Recording saved successfully to:\n{filename}\n\n{total} samples captured."
+			)
+			print(f"Auto-saved {total} samples (CH1) to {filepath}")
+
+		except Exception as e:
+			self.status.setText(f"Save failed - {str(e)}")
 
 	def save_data(self):
 		if len(self.buffers[0]) == 0:
