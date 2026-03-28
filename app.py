@@ -10,6 +10,7 @@ import threading
 import queue
 from time import sleep
 import csv
+from PyQt6.QtGui import QFont, QIntValidator, QPixmap
 from scipy.signal import butter, iirnotch, sosfilt, sosfilt_zi, lfilter, lfilter_zi
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont, QIntValidator
@@ -611,6 +612,59 @@ QPushButton#stopBtn {
 	font-size: 11px;
 	font-weight: bold;
 }
+QFrame#heroCard {
+	background-color: #0f1724;
+	border: 1px solid #1e293b;
+	border-radius: 22px;
+}
+
+QLabel#heroTitle {
+	color: #e2e8f0;
+	font-size: 30px;
+	font-weight: 700;
+	letter-spacing: 1px;
+}
+
+QLabel#heroText {
+	color: #94a3b8;
+	font-size: 13px;
+}
+
+QFrame#ecgStrip {
+	background-color: #081018;
+	border: 1px solid #163041;
+	border-radius: 14px;
+}
+
+QLabel#ecgStripText {
+	color: #19e3a5;
+	font-size: 24px;
+	font-weight: bold;
+	letter-spacing: 2px;
+}
+
+QFrame#infoCard {
+	background-color: #111927;
+	border: 1px solid #253041;
+	border-radius: 16px;
+}
+
+QLabel#infoCardTitle {
+	color: #e2e8f0;
+	font-size: 13px;
+	font-weight: bold;
+}
+
+QLabel#infoCardText {
+	color: #8ea3b7;
+	font-size: 11px;
+	line-height: 1.4;
+}
+
+QLabel#homeFooter {
+	color: #5f7287;
+	font-size: 10px;
+}
 QPushButton#stopBtn:hover {
 	background-color: #5a2020;
 }
@@ -803,7 +857,7 @@ class MainWindow(QMainWindow):
 
 	def __init__(self, use_hardware=True):
 		super().__init__()
-		self.setWindowTitle("ECG Monitor")
+		self.setWindowTitle("Smart ECG Monitor")
 		self.setObjectName("root")
 		self.use_hardware = use_hardware and SPI_AVAILABLE
 		self.ads1293 = None
@@ -893,57 +947,119 @@ class MainWindow(QMainWindow):
 		page.setObjectName("homePage")
 
 		outer = QVBoxLayout(page)
-		outer.setContentsMargins(0, 0, 0, 0)
-		outer.setSpacing(0)
+		outer.setContentsMargins(40, 30, 40, 30)
+		outer.setSpacing(18)
 
-		# -- Content card -------------------------------------------------------
-		card = QWidget()
-		card.setObjectName("homePage")
-		card_layout = QVBoxLayout(card)
-		card_layout.setContentsMargins(40, 16, 40, 16)
-		card_layout.setSpacing(0)
+		# Hero
+		hero = QFrame()
+		hero.setObjectName("heroCard")
+		hero_layout = QVBoxLayout(hero)
+		hero_layout.setContentsMargins(28, 26, 28, 22)
+		hero_layout.setSpacing(14)
 
-		# Title
-		title = QLabel("ECG MONITOR")
-		title.setObjectName("appTitle")
+		title = QLabel("Smart ECG Monitor")
+		title.setObjectName("heroTitle")
 		title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-		card_layout.addWidget(title)
-		card_layout.addSpacing(24)
+		subtitle = QLabel("Real-time acquisition, recording, and analysis")
+		subtitle.setObjectName("heroText")
+		subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-		def _home_btn(label, slot):
+		hero_layout.addWidget(title)
+		hero_layout.addWidget(subtitle)
+
+		outer.addWidget(hero)
+
+		# Cards
+		info_row = QHBoxLayout()
+		info_row.setSpacing(14)
+
+		def make_info_card(title_text, body_text, image_path=None):
+			card = QFrame()
+			card.setObjectName("infoCard")
+			card.setMinimumHeight(300)
+
+			layout = QVBoxLayout(card)
+			layout.setContentsMargins(15, 15, 15, 15)
+			layout.setSpacing(10)
+
+			title_lbl = QLabel(title_text)
+			title_lbl.setObjectName("infoCardTitle")
+			title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+			body_lbl = QLabel(body_text)
+			body_lbl.setObjectName("infoCardText")
+			body_lbl.setWordWrap(True)
+			body_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+			layout.addWidget(title_lbl)
+			layout.addWidget(body_lbl)
+
+			if image_path:
+				image_label = QLabel()
+				pixmap = QPixmap(image_path)
+				if not pixmap.isNull():
+					pixmap = pixmap.scaled(
+						300, 300,
+						Qt.AspectRatioMode.KeepAspectRatio,
+						Qt.TransformationMode.SmoothTransformation
+					)
+					image_label.setPixmap(pixmap)
+					image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+					layout.addWidget(image_label)
+
+			layout.addStretch()
+			return card
+
+		info_row.addWidget(make_info_card(
+			"Live Monitoring",
+			"Visualize ECG leads in real time during acquisition.",
+			"icons/live_monitoring.png"
+		))
+		info_row.addWidget(make_info_card(
+			"Record Session",
+			"Capture ECG data for a selected duration and save it as a file.",
+			"icons/record_session2.png"
+		))
+		info_row.addWidget(make_info_card(
+			"Signal Analysis",
+			"Load a recorded ECG file and run automated processing.",
+			"icons/signal_analysis.png"
+		))
+
+		outer.addLayout(info_row)
+
+		# Buttons closer to content
+		buttons_wrap = QVBoxLayout()
+		buttons_wrap.setSpacing(12)
+
+		def _home_btn(label, slot, danger=False):
 			btn = QPushButton(label)
-			btn.setObjectName("launchBtn")
-			btn.setFixedHeight(40)
-			btn.setFixedWidth(200)
+			btn.setObjectName("exitBtn" if danger else "launchBtn")
+			btn.setFixedHeight(48)
+			btn.setFixedWidth(260)
 			btn.clicked.connect(slot)
+
 			row = QHBoxLayout()
 			row.addStretch()
 			row.addWidget(btn)
 			row.addStretch()
 			return row
 
-		card_layout.addLayout(_home_btn("Launch Live ECG",   self._launch_ecg))
-		card_layout.addSpacing(10)
-		card_layout.addLayout(_home_btn("Process ECG File",  self.process_data))
-		card_layout.addSpacing(10)
+		buttons_wrap.addLayout(_home_btn("Launch Live ECG", self._launch_ecg))
+		buttons_wrap.addLayout(_home_btn("Process ECG File", self.process_data))
+		buttons_wrap.addLayout(_home_btn("Exit", QApplication.instance().quit, danger=True))
 
-		exit_btn = QPushButton("Exit")
-		exit_btn.setObjectName("exitBtn")
-		exit_btn.setFixedHeight(40)
-		exit_btn.setFixedWidth(200)
-		exit_btn.clicked.connect(QApplication.instance().quit)
-		exit_row = QHBoxLayout()
-		exit_row.addStretch()
-		exit_row.addWidget(exit_btn)
-		exit_row.addStretch()
-		card_layout.addLayout(exit_row)
-		card_layout.addStretch()
+		outer.addLayout(buttons_wrap)
 
-		outer.addWidget(card)
+		footer = QLabel("ADS1293 • 3 channels • acquisition • recording • analysis")
+		footer.setObjectName("homeFooter")
+		footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+		outer.addStretch()
+		outer.addWidget(footer)
 
 		return page
-
 	def _build_ecg_page(self):
 		page = QWidget()
 		page.setObjectName("ecgPage")
@@ -1027,7 +1143,7 @@ class MainWindow(QMainWindow):
 		main.addLayout(controls)
 
 		self.btn_start.clicked.connect(self.start_recording)
-		self.btn_stop.clicked.connect(self.stop_recording)
+		self.btn_stop.clicked.connect(lambda: self.stop_recording(True))
 		self.btn_back.clicked.connect(self._go_home)
 		self.btn_channel.clicked.connect(self._toggle_channel)
 
@@ -1167,7 +1283,7 @@ class MainWindow(QMainWindow):
 
 		self.btn_start.setEnabled(False)
 		self.btn_stop.setEnabled(False)
-		QMessageBox.information(self, "Recording", "Recording Started")
+		QMessageBox.information(self, "Recording", "Recording will start after the 3-second countdown.")
 		self.status.setText("Recording starts in 3 seconds...")
 		QTimer.singleShot(3000, self._begin_recording)
 
@@ -1186,7 +1302,7 @@ class MainWindow(QMainWindow):
 		self._countdown_timer.start()
 		print(f"Started recording for {duration}s — target {self._record_target_samples} samples")
 
-	def stop_recording(self):
+	def stop_recording(self, show_discard_message=True):
 		self._record_stop_time = time.time()
 		self.recording = False
 		self._countdown_timer.stop()
@@ -1197,6 +1313,9 @@ class MainWindow(QMainWindow):
 		self.status.setText(f"Stopped ({mode}) - {total} samples/ch")
 		self.btn_start.setEnabled(True)
 		self.btn_stop.setEnabled(False)
+		if show_discard_message:
+			QMessageBox.information(self, "Recording", "Recording discarded.")
+
 		elapsed = self._record_stop_time - self._record_start_time
 		print(f"Stopped recording - captured {total} samples/ch")
 		print(f"  elapsed = {elapsed:.3f}s")
@@ -1211,7 +1330,7 @@ class MainWindow(QMainWindow):
 		"""Called when the target sample count is reached or the safety timer fires."""
 		if not self.recording:
 			return  # already stopped (e.g. user clicked Stop)
-		self.stop_recording()
+		self.stop_recording(show_discard_message=False)
 		QMessageBox.information(self, "Recording", "Recording Done")
 		self.auto_save_data()
 
