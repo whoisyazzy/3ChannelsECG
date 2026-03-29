@@ -9,3 +9,5 @@ mffpy
 scikit-learn==1.7.2
 joblib
 tabulate
+PyQt6
+pyqtgraph

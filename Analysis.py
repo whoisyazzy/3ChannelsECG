@@ -108,7 +108,7 @@ def predict_ais_from_cache(
     ais_model_dir="ais_logreg_model",
     output_filename="ais_prediction.csv"
 ):
-    print("\n🧬 Running AIS severity prediction...")
+    print("\n Running AIS severity prediction...")
 
     cache_dir = "cache"
     os.makedirs(cache_dir, exist_ok=True)
@@ -121,7 +121,7 @@ def predict_ais_from_cache(
             return 0
         return np.nan
     # -----------------------------
-    # 1️⃣ Above T6 check
+    # Above T6 check
     # -----------------------------
     def is_above_t6_local(nli):
         nli = str(nli).strip().upper()
@@ -136,11 +136,11 @@ def predict_ais_from_cache(
         return 0
 
     if is_above_t6_local(nli) != 1:
-        print("⚠ Patient below T6 → AIS model not applied.")
+        print("⚠ Patient Not supported → AIS model not applied.")
         return None
 
     # -----------------------------
-    # 2️⃣ Load AIS model
+    # Load AIS model
     # -----------------------------
     model = joblib.load(os.path.join(ais_model_dir, "ais_logreg.joblib"))
 
@@ -151,7 +151,7 @@ def predict_ais_from_cache(
         feature_cols = [line.strip() for line in f if line.strip()]
 
     # -----------------------------
-    # 3️⃣ Load SCI predictions
+    # Load SCI predictions
     # -----------------------------
     preds = pd.read_csv(predictions_csv_path)
 
@@ -175,7 +175,7 @@ def predict_ais_from_cache(
     preds = preds[["Data ID"] + condition_labels]
 
     # -----------------------------
-    # 4️⃣ Aggregate ECG metrics
+    # Aggregate ECG metrics
     # -----------------------------
     metrics = pd.read_csv(metrics_csv_path)
 
@@ -187,7 +187,7 @@ def predict_ais_from_cache(
 
 
     # -----------------------------
-    # 5️⃣ Merge condition + ECG features
+    # Merge condition + ECG features
     # -----------------------------
     data = preds.merge(grouped, on="Data ID", how="inner")
     for node_name, feature_name in FEATURE_MAP.items():
@@ -225,7 +225,7 @@ def predict_ais_from_cache(
 
     print("=================================================\n")
     # -----------------------------
-    # 6️⃣ Predict AIS
+    #  Predict AIS
     # -----------------------------
     prob = model.predict_proba(X)[:, 1]
     ais_binary = (prob >= threshold).astype(int)
@@ -243,7 +243,7 @@ def predict_ais_from_cache(
 
     result_df.to_csv(output_path, index=False)
 
-    print(f"✅ Saved AIS prediction to {output_path}")
+    print(f" Saved AIS prediction to {output_path}")
     return output_path
 
 
@@ -270,7 +270,7 @@ def predict_sci_conditions_from_cache(
     output_filename="sci_condition_predictions.csv",
     top_k=5
 ):
-    print("\n🧠 Running SCI condition prediction...")
+    print("\n Running SCI condition prediction...")
 
     cache_dir = "cache"
     os.makedirs(cache_dir, exist_ok=True)
@@ -321,7 +321,7 @@ def predict_sci_conditions_from_cache(
             thr = label_thresholds[i]
             margin = LABEL_CONF_MARGIN.get(label, DEFAULT_MARGIN)
 
-            # ✅ IMPORTANT: apply threshold + margin
+            # IMPORTANT: apply threshold + margin
             if p >= (thr + margin):
                 predicted.append(label)
 
@@ -335,7 +335,7 @@ def predict_sci_conditions_from_cache(
     out_df = pd.DataFrame(results)
     out_df.to_csv(output_path, index=False)
 
-    print(f"✅ Saved predictions to {output_path}\n")
+    print(f" Saved predictions to {output_path}\n")
     return output_path
 # CSV ROW WRITER (same format)
 AMPLITUDE_METRICS = {
@@ -377,7 +377,8 @@ def build_single_sci_metrics(
     csv_file,
     input_dir,
     output_csv="single_sci_ecg_metrics.csv",
-    convert_dir="converted_sci"
+    convert_dir="converted_sci",
+    max_duration=None
 ):
     import os
     import csv
@@ -387,12 +388,12 @@ def build_single_sci_metrics(
     cache_dir = "cache"
     os.makedirs(cache_dir, exist_ok=True)
 
-    # ✅ Build full output path inside cache
+    # Build full output path inside cache
     output_path = os.path.join(cache_dir, output_csv)
     csv_path = os.path.join(input_dir, csv_file)
     record_id = os.path.splitext(csv_file)[0]
 
-    print(f"\n➡️ Processing {record_id}")
+    print(f"\n Processing {record_id}")
 
     processed = 0
     failed = 0
@@ -402,7 +403,7 @@ def build_single_sci_metrics(
         fieldnames = None
 
         try:
-            # 1️⃣ Convert CSV → WFDB
+            # Convert CSV → WFDB
             convert_csv_to_dat(
                 csv_file,
                 abnormal_data_dir=input_dir,
@@ -412,14 +413,14 @@ def build_single_sci_metrics(
             # Force loader to use ONLY this file
             loader._sci_iterator = iter([record_id])
 
-            # 2️⃣ Load ECG
-            ecg = init_processing()
+            # Load ECG
+            ecg = init_processing(max_duration=max_duration)
             if ecg is None:
                 raise RuntimeError("init_processing returned None")
 
-            # 3️⃣ Sliding window processing
+            # Sliding window processing
             fs = ecg.get_sampling_rate()
-            window_size = int(fs * WINDOW_SIZE)
+            window_size = int(fs * max_duration)
             step_size = window_size // 6
             end_index = min(len(ecg.get_ecg_signal()), ecg.get_sample_size())
 
@@ -429,28 +430,28 @@ def build_single_sci_metrics(
                     segment = ecg.get_ecg_signal()[win_start:win_end]
                     ecg = process_window_segment(segment, ecg, win_start, win_end)
 
-            # 4️⃣ Create CSV header
+            # Create CSV header
             metric_names = ecg.get_metric_names()
             fieldnames = ["Data ID", "Interval"] + metric_names
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
 
-            # 5️⃣ Write metrics
+            # Write metrics
             write_metrics_rows(ecg, writer)
 
             processed += 1
 
         except Exception as e:
             failed += 1
-            print(f"❌ Failed {record_id}: {e}")
+            print(f"Failed {record_id}: {e}")
 
     elapsed = (time.time() - start_time)
 
     print("\n==============================")
-    print(f"✅ Saved: {output_csv}")
-    print(f"✔ Processed: {processed}")
-    print(f"❌ Failed: {failed}")
-    print(f"⏱ Time: {elapsed:.2f} sec")
+    print(f"Saved: {output_csv}")
+    print(f"Processed: {processed}")
+    print(f"Failed: {failed}")
+    print(f"Time: {elapsed:.2f} sec")
     print("==============================\n")
 
 # ==============================
@@ -483,11 +484,18 @@ if __name__ == "__main__":
     required=True,
     help="Neurological Level of Injury (e.g., C5, T4)"
 )
+    parser.add_argument(
+        "--max_duration",
+        type=float,
+        default=None,
+        help="Maximum ECG duration in seconds; default uses config value"
+    )
     args = parser.parse_args()
     build_single_sci_metrics(
         csv_file=args.csv,
         input_dir="",
-        output_csv="sci_ecg_metrics.csv"
+        output_csv="sci_ecg_metrics.csv",
+        max_duration=args.max_duration
     )
     metrics_path = os.path.join("cache", metrics_output)
 
@@ -508,4 +516,4 @@ if __name__ == "__main__":
     convert_dir = "converted_sci"
     if os.path.exists(convert_dir):
         shutil.rmtree(convert_dir)
-        print(f"🧹 Deleted temporary folder: {convert_dir}")
+        print(f"Deleted temporary folder: {convert_dir}")

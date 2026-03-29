@@ -37,8 +37,8 @@ from utils.handler import *
 
 from data import ECGData
 
-def init_processing():
-    record_data = load_ecg_record()
+def init_processing(max_duration=None):
+    record_data = load_ecg_record(max_duration=max_duration)
     if record_data is None:
         error_handler(f"Failed to load record")
         return None
